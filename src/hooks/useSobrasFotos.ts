@@ -11,10 +11,20 @@ import { supabase } from '@/lib/supabase'
  * O bucket é público de propósito: o Mercado Livre baixa a imagem pela URL na hora de
  * publicar. Se ele tomar 403, o anúncio trava em `picture downloading pending`.
  */
+/**
+ * A ORDEM aqui é a ordem das fotos no anúncio — `ordem` sai do índice deste array.
+ *
+ * A primeira é a capa, a única que aparece na busca. Ela é um AMBIENTE porque é o que os
+ * anúncios que vendem nessa categoria fazem: o campeão de vendas que serviu de referência
+ * (+500 vendidos) abre com a persiana instalada num quarto montado, e deixa o fundo branco
+ * lá pro meio, junto dos componentes.
+ */
 export const TIPOS_FOTO = [
-  { id: 'fundo_branco', rotulo: 'Fundo branco', dica: 'É a CAPA — a que aparece na busca do ML. Só o tecido, sem texto e sem marca d’água.' },
+  { id: 'ambiente',     rotulo: 'Ambiente', dica: 'É a CAPA — a única que aparece na busca. Persiana instalada na janela, cômodo montado. Sem texto e sem marca d’água.' },
+  { id: 'ambiente_2',   rotulo: 'Ambiente 2', dica: 'Outro cômodo ou outro ângulo, pra quem clicou ver que funciona em mais de um lugar.' },
   { id: 'zoom',         rotulo: 'Zoom da textura', dica: 'Close no tecido: é o que responde "como ele é de perto?".' },
-  { id: 'ambiente',     rotulo: 'Ambiente', dica: 'A persiana instalada numa janela, pra pessoa imaginar na casa dela.' },
+  { id: 'medida',       rotulo: 'Medida', dica: 'A persiana com as cotas. Nessa categoria o comprador escolhe pela medida antes de tudo.' },
+  { id: 'fundo_branco', rotulo: 'Fundo branco', dica: 'O tecido e os componentes (mecanismo, suportes) recortados no branco.' },
   { id: 'explicativa',  rotulo: 'Explicativa', dica: 'Pode ter texto e ícones: o que o tecido faz (bloqueia luz, filtra sol...).' },
 ] as const
 

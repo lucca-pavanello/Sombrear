@@ -2,6 +2,7 @@ import { useState, useMemo, useRef } from 'react'
 import { Check, AlertCircle, Upload, X, ImageOff, Pencil } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { tbl } from './shared/tableStyles'
+import MlSemanaCard from './MlSemanaCard'
 import { useEstoqueSobras } from '@/hooks/useEstoqueSobras'
 import { usePrecosMl, useSalvarPrecoMl, acharPrecoMl, precoDoAnuncio, type PrecoMl } from '@/hooks/usePrecosMl'
 import {
@@ -122,6 +123,10 @@ export default function MercadoLivreView({ toast }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* A medição de domingo vem primeiro: é o que já aconteceu lá fora. O resto da tela
+          é preparação, e preparação sem leitura do mercado é chute. */}
+      <MlSemanaCard />
+
       {/* Prontidão: o número que diz se dá pra começar ou não */}
       <div className={cn(tbl.container, 'px-5 py-4')}>
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
