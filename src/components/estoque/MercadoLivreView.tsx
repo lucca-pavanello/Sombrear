@@ -262,7 +262,7 @@ export default function MercadoLivreView({ toast }: Props) {
                             <div>
                               <h4 className="mb-2 text-xs font-semibold">Fotos deste tecido</h4>
                               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                                {TIPOS_FOTO.map(tp => {
+                                {TIPOS_FOTO.map((tp, iTipo) => {
                                   const foto = t.fotos.find(f => f.tipo === tp.id)
                                   const id = `${t.chave}|${tp.id}`
                                   return (
@@ -291,7 +291,7 @@ export default function MercadoLivreView({ toast }: Props) {
                                       />
                                       <p className="mt-1 text-[11px] font-medium">
                                         {tp.rotulo}
-                                        {tp.id === 'fundo_branco' && <span className="ml-1 text-primary">capa</span>}
+                                        {iTipo === 0 && <span className="ml-1 text-primary">capa</span>}
                                       </p>
                                       <p className="text-[10px] leading-snug text-muted-foreground">{tp.dica}</p>
                                     </div>
