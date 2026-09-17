@@ -85,6 +85,43 @@ describe('aproveitamento de tecido — peças da mesma largura no mesmo rolo', (
   })
 })
 
+/* Ferragem mínima (17/09/2026): precos_ferragem_familias começa em larg_min = 1,00m para
+   Rolo e Double. Os orçamentos reais (n8n) e a tela de preços já cobravam esse mínimo; o
+   simulador cobrava a largura real e saía mais barato em peça estreita — a cliente comparou
+   o simulador com o orçamento enviado e achou o orçamento caro. */
+const achaFerragem = (r: ReturnType<typeof simular>) =>
+  ('erro' in r ? undefined : r.detalhe.find(d => /^Ferragem/.test(d.parte)))
+
+describe('ferragem — mínimo cobrado da tabela (larg_min 1,00m)', () => {
+  it('Rolo de 0,70m paga ferragem de 1,00m (tubo 32: R$ 48,11 em vez de R$ 39,89)', () => {
+    const r = okOuFalha(simular(rolo({ largura: 0.7 }), dPersiana))
+    expect(achaFerragem(r)?.tabela).toBeCloseTo(48.11, 2)
+  })
+
+  it('Rolo de 0,70m e de 1,00m pagam a MESMA ferragem', () => {
+    const estreita = okOuFalha(simular(rolo({ largura: 0.7 }), dPersiana))
+    const minima = okOuFalha(simular(rolo({ largura: 1.0 }), dPersiana))
+    expect(achaFerragem(estreita)?.tabela).toBeCloseTo(achaFerragem(minima)?.tabela ?? -1, 2)
+  })
+
+  it('acima do mínimo nada muda: Rolo de 1,20m continua pagando 1,20m', () => {
+    const r = okOuFalha(simular(rolo({ largura: 1.2 }), dPersiana))
+    const minima = okOuFalha(simular(rolo({ largura: 1.0 }), dPersiana))
+    expect(achaFerragem(r)?.tabela ?? 0).toBeGreaterThan(achaFerragem(minima)?.tabela ?? 0)
+  })
+
+  it('Double de 0,70m paga ferragem de 1,00m (R$ 63,65)', () => {
+    const r = okOuFalha(simular(rolo({ modelo: 'Double', tecido: 'DOUBLE  NATURAL', largura: 0.7 }), dPersiana))
+    expect(achaFerragem(r)?.tabela).toBeCloseTo(63.65, 2)
+  })
+
+  it('sem a tabela de famílias carregada, cai no comportamento antigo (não quebra quem não passa familias)', () => {
+    const { familias: _sem, ...semFamilias } = dPersiana
+    const r = okOuFalha(simular(rolo({ largura: 0.7 }), semFamilias as DadosSim))
+    expect(achaFerragem(r)?.tabela).toBeCloseTo(39.89, 2)
+  })
+})
+
 describe('Rolo Motorizado — baseline golden do harness de QA (2026-08-03)', () => {
   /* VIRADA DE PREÇO 24/08: a Stella mandou duas tabelas novas de estrutura motorizada
      (até 3,00m sem junção · com junção ou acima de 3,00m). O baseline subiu R$ 13,26 no
