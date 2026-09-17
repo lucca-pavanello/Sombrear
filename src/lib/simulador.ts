@@ -5,7 +5,7 @@
  */
 import type {
   PrecoArtigo, PrecoBando, PrecoBandoParams, PrecoBarraFaixa, PrecoColocacao,
-  PrecoFerragemComponente, PrecoMotorComponente, PrecoMotorEstrutura, PrecoParametro,
+  PrecoFerragemComponente, PrecoFerragemFamilia, PrecoMotorComponente, PrecoMotorEstrutura, PrecoParametro,
   PrecoPh50, PrecoRomanaMatriz, PrecoTecidoVigente,
 } from '@/hooks/usePrecos'
 
@@ -43,6 +43,8 @@ export interface EntradaSim {
 export interface DadosSim {
   tecidos: PrecoTecidoVigente[]
   componentes: PrecoFerragemComponente[]
+  /** faixa de largura cobrável por família de ferragem — larg_min é o mínimo cobrado (a tabela da loja começa em 1,00m) */
+  familias?: PrecoFerragemFamilia[]
   bandos: PrecoBando[]
   bandoParams: PrecoBandoParams[]
   barraFaixas: PrecoBarraFaixa[]
@@ -296,7 +298,14 @@ export function simular(e: EntradaSim, d: DadosSim): ResultadoSim | { erro: stri
       if (comps.length === 0) return { erro: `Ferragem ${familia} ${e.corFerragem} ${espessura || ''} sem componentes` }
       const ml = comps.filter(c => c.tipo_custo === 'por_metro').reduce((s, c) => s + Number(c.valor), 0)
       const fixo = comps.filter(c => c.tipo_custo === 'fixo').reduce((s, c) => s + Number(c.valor), 0)
-      const largFerragem = Math.ceil(L * 10 - 1e-9) / 10
+      // a tabela de ferragem da loja começa em larg_min (1,00m): peça mais estreita paga o mínimo,
+      // igual aos orçamentos do n8n e à tela de preços — sem isso o simulador saía mais barato
+      const fam = (d.familias ?? []).find(f =>
+        f.familia === familia && f.cor === e.corFerragem && Number(f.espessura) === espessura)
+      const largFerragem = Math.max(Math.ceil(L * 10 - 1e-9) / 10, fam ? Number(fam.larg_min) : 0)
+      if (fam && Number(fam.larg_min) > L + 1e-9) {
+        obs.push(`Ferragem cobrada no mínimo da tabela (${fmtM(Number(fam.larg_min))})`)
+      }
       custoFerragem = ml * largFerragem + fixo
       chaveFerragem = familia === 'DOUBLE'
         ? `parceiro_ferragem_double_${e.corFerragem.toLowerCase()}`

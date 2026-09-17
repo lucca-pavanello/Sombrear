@@ -8599,5 +8599,55 @@
    "custo": "24.7",
    "quantidade": 3
   }
+ ],
+ "familias": [
+  {
+   "familia": "ROLO",
+   "cor": "BRANCA",
+   "espessura": 32,
+   "larg_min": 1.0,
+   "larg_max": 4.0,
+   "passo": 0.1
+  },
+  {
+   "familia": "ROLO",
+   "cor": "BRANCA",
+   "espessura": 38,
+   "larg_min": 1.0,
+   "larg_max": 4.0,
+   "passo": 0.1
+  },
+  {
+   "familia": "ROLO",
+   "cor": "PRETA",
+   "espessura": 38,
+   "larg_min": 1.0,
+   "larg_max": 4.0,
+   "passo": 0.1
+  },
+  {
+   "familia": "ROLO",
+   "cor": "BRANCA",
+   "espessura": 50,
+   "larg_min": 1.0,
+   "larg_max": 4.0,
+   "passo": 0.1
+  },
+  {
+   "familia": "DOUBLE",
+   "cor": "BRANCA",
+   "espessura": 0,
+   "larg_min": 1.0,
+   "larg_max": 4.0,
+   "passo": 0.1
+  },
+  {
+   "familia": "DOUBLE",
+   "cor": "PRETA",
+   "espessura": 0,
+   "larg_min": 1.0,
+   "larg_max": 4.0,
+   "passo": 0.1
+  }
  ]
 }

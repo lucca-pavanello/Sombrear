@@ -152,6 +152,7 @@ Deno.serve(async (req) => {
       { data: tecidos }, { data: componentes }, { data: bandos }, { data: bandoParams },
       { data: barraFaixas }, { data: colocacao }, { data: artigos }, { data: ph50 },
       { data: parametros }, { data: romana }, { data: motorEstrutura }, { data: motorComponentes },
+      { data: familias },
     ] = await Promise.all([
       db.from('precos_tecidos_vigentes').select('*'),
       db.from('precos_ferragem_componentes').select('*'),
@@ -165,6 +166,7 @@ Deno.serve(async (req) => {
       db.from('precos_romana_matriz').select('*'),
       db.from('precos_motor_estrutura').select('*'),
       db.from('precos_motor_componentes').select('*'),
+      db.from('precos_ferragem_familias').select('*'),
     ])
 
     // deno-lint-ignore no-explicit-any
@@ -173,6 +175,7 @@ Deno.serve(async (req) => {
       bandoParams: bandoParams ?? [], barraFaixas: barraFaixas ?? [], colocacao: colocacao ?? [],
       artigos: artigos ?? [], ph50: ph50 ?? [], parametros: parametros ?? [], romana: romana ?? [],
       motorEstrutura: motorEstrutura ?? [], motorComponentes: motorComponentes ?? [],
+      familias: familias ?? [],
       // deno-lint-ignore no-explicit-any
     } as any)
     if ('erro' in r) return resposta(200, { erro: r.erro })
