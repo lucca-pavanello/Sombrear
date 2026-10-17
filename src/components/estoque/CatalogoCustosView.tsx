@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 import {
   Search, Scissors, Wrench, ChevronRight, FileText, Package,
-  Truck, CircleHelp, Receipt,
+  Truck, CircleHelp, Receipt, Plus,
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { CustomSelect } from '@/components/ui/CustomSelect'
 import KpiCard from '@/components/shared/KpiCard'
 import EstoqueTable, { type EstoqueTableColumn } from './shared/EstoqueTable'
 import SectionCard from './shared/SectionCard'
+import CorrigirCustoModal from './CorrigirCustoModal'
 import { tbl } from './shared/tableStyles'
 import {
   useCustosVigentes, useHistoricoCusto, useApenasCotados,
@@ -53,7 +54,9 @@ interface Props {
   toast: (type: ToastType, message: string) => void
 }
 
-export default function CatalogoCustosView(_: Props) {
+type Edicao = { modo: 'editar'; item: CustoVigente } | { modo: 'novo' }
+
+export default function CatalogoCustosView({ toast }: Props) {
   const { data: custos = [], isLoading, error } = useCustosVigentes()
   const { data: cotados = [] } = useApenasCotados()
 
@@ -62,6 +65,7 @@ export default function CatalogoCustosView(_: Props) {
   const [categoria, setCategoria] = useState('all')
   const [fornecedor, setFornecedor] = useState('all')
   const [aberto, setAberto] = useState<CustoVigente | null>(null)
+  const [edicao, setEdicao] = useState<Edicao | null>(null)
 
   const porGrupo = useMemo(
     () => ({
@@ -172,13 +176,22 @@ export default function CatalogoCustosView(_: Props) {
       header: '',
       align: 'center',
       cell: c => (
-        <button
-          type="button"
-          onClick={() => setAberto(c)}
-          className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-brand hover:bg-muted/60 transition-colors inline-flex items-center gap-1"
-        >
-          Histórico <ChevronRight className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={() => setEdicao({ modo: 'editar', item: c })}
+            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-brand"
+          >
+            Corrigir
+          </button>
+          <button
+            type="button"
+            onClick={() => setAberto(c)}
+            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-brand"
+          >
+            Histórico <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
       ),
     },
   ]
@@ -301,6 +314,9 @@ export default function CatalogoCustosView(_: Props) {
               ...fornecedores.map(f => ({ value: f, label: f })),
             ]}
           />
+          <button type="button" onClick={() => setEdicao({ modo: 'novo' })} className={tbl.addBtn}>
+            <Plus className="h-4 w-4" /> Novo material
+          </button>
         </div>
 
         <EstoqueTable
@@ -354,6 +370,14 @@ export default function CatalogoCustosView(_: Props) {
       )}
 
       {aberto && <PainelHistorico item={aberto} onFechar={() => setAberto(null)} />}
+
+      {edicao && (
+        <CorrigirCustoModal
+          item={edicao.modo === 'editar' ? edicao.item : null}
+          onFechar={() => setEdicao(null)}
+          toast={toast}
+        />
+      )}
     </div>
   )
 }
