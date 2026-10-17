@@ -539,6 +539,7 @@ export default function Dashboard() {
     { id: 'vendas',       label: 'Vendas',        icon: ShoppingCart    },
     { id: 'produtos',     label: 'Produtos',      icon: Package         },
     { id: 'fornecedores', label: 'Fornecedores',  icon: Truck           },
+    { id: 'custos',       label: 'Custos',        icon: CircleDollarSign },
     { id: 'localizacoes', label: 'Localizações',  icon: MapPin          },
     { id: 'sobras',       label: 'Sobras',        icon: Scissors        },
     { id: 'mercado-livre', label: 'Mercado Livre', icon: Store          },
