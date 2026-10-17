@@ -128,18 +128,30 @@ export default function CatalogoCustosView(_: Props) {
       key: 'custo',
       header: 'Custo',
       align: 'right',
-      cell: c => (
-        <div className="text-right">
-          <div className="font-semibold tabular-nums text-foreground">
-            {precoPor(c.custo_unitario, c.unidade_canonica)}
-          </div>
-          {c.desconto_pct > 0 && (
-            <div className="text-xs text-muted-foreground tabular-nums">
-              {formatCurrency(c.preco_bruto)} − {c.desconto_pct}%
+      cell: c => {
+        // O fornecedor pode cobrar numa unidade e a loja consumir noutra: o
+        // deslizante vem por MILHEIRO. Empilhar "R$ 0,18 / un" embaixo de
+        // "R$ 259,44 − 30%" sem dizer a unidade do bruto faz o preço parecer
+        // conta errada. Quando converte, a linha de baixo carrega a unidade.
+        const converteu = c.unidade_documento !== rotuloUnidade(c.unidade_canonica).toUpperCase()
+          && Math.abs(c.preco_liquido - c.custo_unitario) > 0.0001
+        return (
+          <div className="text-right">
+            <div className="font-semibold tabular-nums text-foreground">
+              {precoPor(c.custo_unitario, c.unidade_canonica)}
             </div>
-          )}
-        </div>
-      ),
+            {converteu ? (
+              <div className="text-xs text-muted-foreground tabular-nums">
+                {formatCurrency(c.preco_liquido)} por {c.unidade_documento}
+              </div>
+            ) : c.desconto_pct > 0 ? (
+              <div className="text-xs text-muted-foreground tabular-nums">
+                tabela {formatCurrency(c.preco_bruto)} − {c.desconto_pct}%
+              </div>
+            ) : null}
+          </div>
+        )
+      },
     },
     {
       key: 'origem',
@@ -349,7 +361,7 @@ export default function CatalogoCustosView(_: Props) {
 // ─── Histórico de um produto ──────────────────────────────────────────────────
 
 function PainelHistorico({ item, onFechar }: { item: CustoVigente; onFechar: () => void }) {
-  const { data: ocorrencias = [], isLoading } = useHistoricoCusto(item)
+  const { data: ocorrencias = [], isLoading, error } = useHistoricoCusto(item)
 
   return (
     <div
@@ -381,6 +393,20 @@ function PainelHistorico({ item, onFechar }: { item: CustoVigente; onFechar: () 
                 <div key={i} className="h-14 rounded-lg skeleton-shimmer" />
               ))}
             </div>
+          ) : error ? (
+            /* Lista vazia e consulta quebrada são coisas MUITO diferentes, e
+               sem isto as duas apareciam igual: um painel em branco. */
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+              <p className="font-medium text-destructive">Não deu para carregar o histórico.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {error instanceof Error ? error.message : 'Erro desconhecido.'}
+              </p>
+            </div>
+          ) : ocorrencias.length === 0 ? (
+            <p className="rounded-lg border border-border/60 p-4 text-sm text-muted-foreground">
+              Nenhum documento deste fornecedor registra este produto. Se ele aparece na
+              lista, o custo veio de outro lugar — vale conferir.
+            </p>
           ) : (
             <ol className="space-y-2">
               {ocorrencias.map((o, i) => {

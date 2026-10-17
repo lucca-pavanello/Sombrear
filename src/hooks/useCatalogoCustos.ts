@@ -33,6 +33,10 @@ export interface CustoVigente {
   custo_unitario: number
   preco_bruto: number
   desconto_pct: number
+  /** A unidade em que o fornecedor cobrou: PC, MTS, MILH, ROLO. */
+  unidade_documento: string
+  /** O líquido NA UNIDADE DO PAPEL — não confundir com `custo_unitario`. */
+  preco_liquido: number
   tipo: TipoDocumento
   referencia: string
   data_documento: string | null
@@ -153,12 +157,21 @@ export function useHistoricoCusto(item: CustoVigente | null) {
         ? q.eq('codigo_fornecedor', item.codigo_fornecedor)
         : q.eq('descricao', item.descricao)
 
-      const { data, error } = await q.order('data_documento', {
-        ascending: false,
-        referencedTable: 'catalogo_documentos',
-      })
+      const { data, error } = await q
       if (error) throw error
-      return (data ?? []) as unknown as OcorrenciaCusto[]
+
+      // Ordena aqui, não no PostgREST: `catalogo_documentos` é uma relação
+      // para-um, e `referencedTable` ordena DENTRO de uma lista embutida —
+      // não serve para ordenar as linhas de fora por uma coluna de lá. São
+      // poucas ocorrências por produto; ordenar no cliente é exato e barato.
+      const linhas = (data ?? []) as unknown as OcorrenciaCusto[]
+      return linhas
+        .slice()
+        .sort((a, b) =>
+          (b.catalogo_documentos?.data_documento ?? '').localeCompare(
+            a.catalogo_documentos?.data_documento ?? ''
+          )
+        )
     },
     staleTime: 60_000,
     retry: 1,
