@@ -250,22 +250,90 @@ export async function executarTool(
       }
 
       case "cadastrar_produto": {
+        // `categoria_id` é NOT NULL com FK, e a unidade tem CHECK de quatro
+        // valores minúsculos. Resolver aqui, e recusar com a lista do que
+        // vale, evita jogar no banco um insert que só voltaria como erro
+        // cru de constraint.
+        const nomeCategoria = String(args.categoria ?? "").trim()
+        const { data: cats, error: eCat } = await supabase
+          .from("estoque_categorias")
+          .select("id, nome, tipo")
+        if (eCat) throw eCat
+
+        const achatar = (s: string) =>
+          s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
+        const categoria = (cats ?? []).find(
+          (c: { nome: string }) => achatar(c.nome) === achatar(nomeCategoria)
+        ) as { id: string; nome: string } | undefined
+
+        if (!categoria) {
+          return {
+            sucesso: false,
+            mensagem:
+              `"${nomeCategoria}" não é uma categoria cadastrada. Escolha uma destas: ` +
+              (cats ?? []).map((c: { nome: string }) => c.nome).join(", ") + ".",
+          }
+        }
+
+        const unidade = String(args.unidade ?? "").toLowerCase().trim()
+        if (!["m", "m2", "un", "kg"].includes(unidade)) {
+          return {
+            sucesso: false,
+            mensagem: `Unidade "${args.unidade}" não existe. Use m, m2, un ou kg.`,
+          }
+        }
+
+        // `estoque_produtos.fornecedor` é TEXT, não FK — o contexto do chat
+        // entrega ids, então converte aqui em vez de gravar um uuid como se
+        // fosse nome de fornecedor.
+        let fornecedorNome: string | null = null
+        if (args.fornecedor_id) {
+          const { data: f } = await supabase
+            .from("estoque_fornecedores")
+            .select("nome")
+            .eq("id", args.fornecedor_id as string)
+            .maybeSingle()
+          fornecedorNome = (f as { nome: string } | null)?.nome ?? null
+          if (!fornecedorNome) {
+            return {
+              sucesso: false,
+              mensagem: "Esse fornecedor não existe. Confira a lista do contexto.",
+            }
+          }
+        }
+
         const { data, error } = await supabase
           .from("estoque_produtos")
           .insert({
-            sku: args.sku,
             nome: args.nome,
-            tipo: args.tipo,
-            unidade: args.unidade,
-            custo_medio: (args.custo_inicial as number) || 0,
-            preco_venda: (args.preco_venda as number) || null,
-            fornecedor_id: (args.fornecedor_id as string) || null,
+            codigo: (args.codigo as string)?.trim() || null,
+            categoria_id: categoria.id,
+            unidade,
+            custo_unitario: (args.custo_inicial as number) ?? null,
+            preco_venda: (args.preco_venda as number) ?? null,
+            quantidade_minima: (args.quantidade_minima as number) ?? 0,
+            fornecedor: fornecedorNome,
             ativo: true,
           })
-          .select()
+          .select("id, nome, codigo, unidade")
           .single()
-        if (error) throw error
-        return { sucesso: true, mensagem: `Produto ${(data as Record<string,unknown>).nome} cadastrado!`, dados: data }
+
+        if (error) {
+          // `codigo` é UNIQUE: dizer isso é mais útil que repassar o 23505.
+          if (error.code === "23505") {
+            return {
+              sucesso: false,
+              mensagem: `Já existe um produto com o código "${args.codigo}". Use outro código.`,
+            }
+          }
+          throw error
+        }
+        const p = data as Record<string, unknown>
+        return {
+          sucesso: true,
+          mensagem: `${p.nome} cadastrado em ${categoria.nome}, medido em ${unidade}.`,
+          dados: data,
+        }
       }
 
       case "cadastrar_fornecedor": {
@@ -429,7 +497,13 @@ export function gerarPreviewAcao(
     }
 
     case "cadastrar_produto":
-      return `Cadastrar produto:\n- SKU: ${args.sku}\n- Nome: ${args.nome}\n- Tipo: ${args.tipo}\n- Unidade: ${args.unidade}`
+      return (
+        `Cadastrar produto:\n- Nome: ${args.nome}\n- Categoria: ${args.categoria}\n` +
+        `- Medido em: ${String(args.unidade ?? "").toLowerCase()}` +
+        `${args.codigo ? `\n- Código: ${args.codigo}` : ""}` +
+        `${args.custo_inicial != null ? `\n- Custo: R$ ${Number(args.custo_inicial).toFixed(2)}` : ""}` +
+        `${args.preco_venda != null ? `\n- Preço de venda: R$ ${Number(args.preco_venda).toFixed(2)}` : ""}`
+      )
 
     case "cadastrar_fornecedor":
       return `Cadastrar fornecedor:\n- Nome: ${args.nome}${args.cnpj ? `\n- CNPJ: ${args.cnpj}` : ""}${args.lead_time_dias ? `\n- Lead time: ${args.lead_time_dias} dias` : ""}`
