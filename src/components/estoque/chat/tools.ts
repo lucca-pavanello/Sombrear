@@ -157,31 +157,43 @@ export const TOOLS_GEMINI: any = {
     {
       name: "cadastrar_produto",
       description:
-        "Cadastra um novo produto. Pede confirmação ANTES de executar. Use quando o usuário pedir 'cadastra um produto', 'adiciona X no catálogo'.",
+        "Cadastra um novo produto no estoque. Pede confirmação ANTES de executar. Use quando o usuário pedir 'cadastra um produto', 'adiciona X no catálogo'. A categoria é obrigatória: escolha pelo NOME exato da lista CATEGORIAS DE PRODUTO do contexto, e se o usuário não disser qual, PERGUNTE em vez de escolher.",
       parameters: {
         type: "OBJECT",
         properties: {
-          sku: { type: "STRING", description: "Código SKU único" },
           nome: { type: "STRING", description: "Nome do produto" },
-          tipo: {
+          categoria: {
             type: "STRING",
-            description: "Tecido, Ferragem ou Acessório",
+            description:
+              "Nome exato de uma categoria da lista CATEGORIAS DE PRODUTO (ex: 'Trilhos e Perfis', 'Tecidos Rolo/Romana').",
           },
-          unidade: { type: "STRING", description: "UN, M, M2, KG" },
+          unidade: {
+            type: "STRING",
+            description:
+              "Como o produto é medido: 'm' (metro), 'm2' (metro quadrado), 'un' (unidade) ou 'kg'. Só esses quatro.",
+          },
+          codigo: {
+            type: "STRING",
+            description: "Código interno do produto, único na loja (opcional).",
+          },
           custo_inicial: {
             type: "NUMBER",
-            description: "Custo de aquisição (opcional)",
+            description: "Quanto a loja paga por unidade (opcional).",
           },
           preco_venda: {
             type: "NUMBER",
-            description: "Preço de venda (opcional)",
+            description: "Preço de venda (opcional).",
+          },
+          quantidade_minima: {
+            type: "NUMBER",
+            description: "Estoque mínimo antes de repor (opcional, padrão 0).",
           },
           fornecedor_id: {
             type: "STRING",
-            description: "ID do fornecedor (opcional)",
+            description: "ID de um fornecedor da lista do contexto (opcional).",
           },
         },
-        required: ["sku", "nome", "tipo", "unidade"],
+        required: ["nome", "categoria", "unidade"],
       },
     },
     {

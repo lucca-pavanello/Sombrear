@@ -94,6 +94,9 @@ ${
 FORNECEDORES CADASTRADOS:
 ${contexto.fornecedores.map((f) => `- ID: ${f.id} | ${f.nome} (lead time: ${f.lead_time_dias}d)`).join("\n")}
 
+CATEGORIAS DE PRODUTO (use o NOME exato ao cadastrar):
+${(contexto.categorias ?? []).map((c) => `- ${c.nome} (${c.tipo})`).join("\n") || "- nenhuma cadastrada"}
+
 LOCALIZAÇÕES CADASTRADAS:
 ${contexto.localizacoes.map((l) => `- ID: ${l.id} | ${l.codigo} - ${l.setor} (${l.nivel_acesso})`).join("\n")}
 

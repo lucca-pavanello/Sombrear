@@ -57,5 +57,10 @@ export interface ChatContextoEstoque {
   }>
   fornecedores: Array<{ id: string; nome: string; lead_time_dias: number }>
   localizacoes: Array<{ id: string; codigo: string; setor: string; nivel_acesso: string }>
+  /**
+   * `estoque_produtos.categoria_id` é NOT NULL, então sem esta lista a IA não
+   * tem como cadastrar produto nenhum. Entrou na RPC em 17/10/2026.
+   */
+  categorias: Array<{ id: string; nome: string; tipo: string }>
   configuracoes: Record<string, string>
 }
