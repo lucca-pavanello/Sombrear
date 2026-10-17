@@ -55,6 +55,16 @@ export interface PrecoTecidoVigente {
 export interface PrecoCortinaTecido {
   id: number; nome: string; tipo: string; preco: number
   largura_rolo: number; observacao: string | null
+  /**
+   * De qual material comprado vem este tecido de venda. Dito pela loja, uma
+   * vez: "Microfibra 90g (3,00m)" não se parece com "MICROFIBRA 3.00M BEGE",
+   * e casar por nome deu zero acerto nos 12 tecidos.
+   * Aponta para a chave da view de custo, não para a linha — a linha muda a
+   * cada correção de custo.
+   */
+  catalogo_fornecedor_id?: string | null
+  catalogo_descricao?: string | null
+  catalogo_codigo?: string | null
 }
 export interface PrecoCortinaValor {
   chave: string; valor: number | null; descricao: string | null

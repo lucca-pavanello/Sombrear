@@ -18,6 +18,9 @@ import { CustomSelect } from '@/components/ui/CustomSelect'
 import { Button, EmptyState } from '@/components/ui/primitives'
 import SectionHeader from '@/components/shared/SectionHeader'
 import { usePrecosCortinaTecidos, usePrecosCortinaValores } from '@/hooks/usePrecos'
+import { useCustoTecidoCortina } from '@/hooks/useCustoTecidoCortina'
+import CustoDoTecido, { panosDaCortina, somarPanos } from './CustoDoTecido'
+import { formatarMargem } from '@/lib/catalogo/margem'
 import {
   calcularAmbientesCortina, type AmbienteCortina, type CortinaConfig,
   type ModeloCortina, type SuporteCortina,
@@ -82,6 +85,24 @@ export default function CalculadoraCortina() {
     if (!tecidos?.length || !valores?.length) return null
     return calcularAmbientesCortina(ambientes, { tecidos, valores })
   }, [tecidos, valores, ambientes])
+
+  /**
+   * Custo de compra do pano, do catálogo de custos. Só informa: nada aqui
+   * entra no valor cobrado, e o texto copiado para o cliente não muda.
+   */
+  const { porNome: custosDoPano } = useCustoTecidoCortina()
+  const panosPorItem = useMemo(() => {
+    const mapa = new Map<string, ReturnType<typeof panosDaCortina>>()
+    for (const [idx, i] of (resultado?.ok ?? []).entries()) {
+      mapa.set(`${i.cortina.id}-${idx}`, panosDaCortina(
+        i.cortina.tecido, i.cortina.forro, i.resultado.consumo, i.resultado.quantidade,
+        tecidos ?? [], custosDoPano))
+    }
+    return mapa
+  }, [resultado, tecidos, custosDoPano])
+
+  const custoTotalPano = useMemo(
+    () => somarPanos([...panosPorItem.values()].flat()), [panosPorItem])
 
   const temItens = (resultado?.ok.length ?? 0) > 0
   const observacoes = useMemo(
@@ -340,6 +361,10 @@ export default function CalculadoraCortina() {
                             ))}
                           </tbody>
                         </table>
+                        <CustoDoTecido
+                          panos={panosPorItem.get(chave) ?? []}
+                          temFranzido={!!i.cortina.franzido}
+                        />
                       </div>
                     )}
                   </div>
@@ -353,6 +378,14 @@ export default function CalculadoraCortina() {
                   <span>Até 4x</span><span className="tabular-nums">{brl(resultado.parcelado)}</span></div>
                 <div className="mt-0.5 flex justify-between text-xs text-emerald-600 dark:text-emerald-400">
                   <span>À vista (−5%)</span><span className="font-semibold tabular-nums">{brl(resultado.avista)}</span></div>
+                {custoTotalPano && (
+                  <div className="mt-2 flex justify-between border-t border-border/50 pt-2 text-xs text-muted-foreground">
+                    <span>Pano: paga {brl(custoTotalPano.custo)}</span>
+                    <span className="font-semibold tabular-nums">
+                      margem {formatarMargem(custoTotalPano.margem)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <Button onClick={copiar} fullWidth>

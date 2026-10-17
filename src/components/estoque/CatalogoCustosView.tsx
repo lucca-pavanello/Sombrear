@@ -9,6 +9,7 @@ import KpiCard from '@/components/shared/KpiCard'
 import EstoqueTable, { type EstoqueTableColumn } from './shared/EstoqueTable'
 import SectionCard from './shared/SectionCard'
 import CorrigirCustoModal from './CorrigirCustoModal'
+import LigarTecidosVenda from './LigarTecidosVenda'
 import { tbl } from './shared/tableStyles'
 import {
   useCustosVigentes, useHistoricoCusto, useApenasCotados,
@@ -368,6 +369,8 @@ export default function CatalogoCustosView({ toast }: Props) {
           </div>
         </SectionCard>
       )}
+
+      <LigarTecidosVenda toast={toast} />
 
       {aberto && <PainelHistorico item={aberto} onFechar={() => setAberto(null)} />}
 
