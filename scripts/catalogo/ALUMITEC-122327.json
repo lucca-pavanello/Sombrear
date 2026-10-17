@@ -1,0 +1,56 @@
+{
+  "fornecedor": "ALUMITEC ALUMINIO",
+  "tipo": "pedido",
+  "referencia": "ALUMITEC-122327",
+  "data_documento": "24/06/2026",
+  "frete_tipo": "FOB",
+  "total_declarado": 848.82,
+  "arquivo_origem": "PEDIDO 122327 - ANDRADE SILVA D.pdf",
+  "itens": [
+    {
+      "seq": 1,
+      "codigo_fornecedor": "6137",
+      "descricao": "SLSBB-SUPORTE L SIMPLES BRANCO",
+      "quantidade_documento": 40.0,
+      "unidade_documento": "PC",
+      "preco_bruto": 10.57,
+      "desconto_pct": 30.0,
+      "preco_liquido": 7.399,
+      "subtotal": 295.96,
+      "categoria": "suporte",
+      "cor": "branco",
+      "largura_m": null
+    },
+    {
+      "seq": 2,
+      "codigo_fornecedor": "5738",
+      "descricao": "PTA29BB-PONTEIRA TAMPA 29 BRANCO",
+      "quantidade_documento": 20.0,
+      "unidade_documento": "PC",
+      "preco_bruto": 6.64,
+      "desconto_pct": 30.0,
+      "preco_liquido": 4.648,
+      "subtotal": 92.96,
+      "categoria": "ponteira",
+      "cor": "branco",
+      "largura_m": null
+    },
+    {
+      "seq": 3,
+      "codigo_fornecedor": "9051",
+      "descricao": "TS29LBB-TUBO DESL LEVE 29MM BRANCO",
+      "quantidade_documento": 36.0,
+      "unidade_documento": "MTS",
+      "preco_bruto": 18.25,
+      "desconto_pct": 30.0,
+      "preco_liquido": 12.775,
+      "subtotal": 459.9,
+      "categoria": "varao",
+      "cor": "branco",
+      "largura_m": null
+    }
+  ],
+  "condicao_pagamento": "BOLETO 30 dias",
+  "itens_conferidos": 3,
+  "desconto_declarado": 363.78
+}

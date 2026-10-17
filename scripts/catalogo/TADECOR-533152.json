@@ -1,0 +1,58 @@
+{
+  "fornecedor": "TAPECARIA AMERICANA DECOR",
+  "tipo": "pedido",
+  "referencia": "TADECOR-533152",
+  "data_documento": "02/10/2026",
+  "frete_tipo": "CIF",
+  "tabela_preco": "MT (P/ PECA)",
+  "categoria_cliente": "PRATA",
+  "condicao_pagamento": "30/60/90 DIAS",
+  "total_declarado": 4031.48,
+  "arquivo_origem": "imagem do PEDIDO VENDA 0000533152",
+  "observacoes": "Desc. 0,00 em todos os itens: o desconto ja esta embutido na tabela de preco. NAO aplicar os 30% da Alumitec aqui. Frete EMITENTE (CIF): o fornecedor paga.",
+  "itens": [
+    {
+      "seq": 1,
+      "codigo_fornecedor": "38.013/09",
+      "descricao": "LINHO IRLANDES II - TRIGO",
+      "categoria": "tecido",
+      "cor": "trigo",
+      "largura_m": null,
+      "quantidade_documento": 94.6,
+      "unidade_documento": "MT",
+      "preco_bruto": 16.4,
+      "desconto_pct": 0,
+      "preco_liquido": 16.4,
+      "subtotal": 1551.44
+    },
+    {
+      "seq": 2,
+      "codigo_fornecedor": "22.139.1.L/05",
+      "descricao": "MICROFIBRA CLASSICA 3,30L - AREIA",
+      "categoria": "tecido",
+      "cor": "areia",
+      "largura_m": 3.3,
+      "quantidade_documento": 100.0,
+      "unidade_documento": "MT",
+      "preco_bruto": 13.9,
+      "desconto_pct": 0,
+      "preco_liquido": 13.9,
+      "subtotal": 1390.0,
+      "observacao": "NAO e a mesma MICROFIBRA da Corttex (3,00 m, R$ 6,30/m). Preco 2,2x maior."
+    },
+    {
+      "seq": 3,
+      "codigo_fornecedor": "38.041",
+      "descricao": "LINHO LIBIO - COR UNICA",
+      "categoria": "tecido",
+      "cor": null,
+      "largura_m": null,
+      "quantidade_documento": 47.6,
+      "unidade_documento": "MT",
+      "preco_bruto": 22.9,
+      "desconto_pct": 0,
+      "preco_liquido": 22.9,
+      "subtotal": 1090.04
+    }
+  ]
+}
