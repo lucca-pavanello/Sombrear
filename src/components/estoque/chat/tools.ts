@@ -8,8 +8,10 @@ export const NIVEIS_CONFIRMACAO = {
   listar_sugestoes_compra: 1,
   recalcular_curva_abc: 1,
   gerar_pedido_compra_csv: 1,
+  consultar_custo_material: 1,
 
   // Nível 2 — confirmação simples (cadastros e edições leves)
+  atualizar_custo_material: 2,
   cadastrar_produto: 2,
   cadastrar_fornecedor: 2,
   cadastrar_localizacao: 2,
@@ -99,7 +101,59 @@ export const TOOLS_GEMINI: any = {
       },
     },
 
+    {
+      name: "consultar_custo_material",
+      description:
+        "Consulta QUANTO A LOJA PAGA por um material de cortina (tecido, trilho, varão, ponteira, suporte, deslizante). Lê o catálogo de custos, que vem dos pedidos de fornecedor. Use para 'quanto custa a microfibra?', 'por quanto compramos o trilho max duplo?', 'qual o custo do voil flame'. SEMPRE chame esta ferramenta ANTES de atualizar_custo_material, porque é ela que devolve o material_id. Se houver mais de um material parecido, ela devolve a lista — nesse caso PERGUNTE ao usuário qual, não escolha por conta própria. Não confunda com preço de venda: isto é o que a loja paga ao fornecedor.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          material: {
+            type: "STRING",
+            description:
+              "Nome do material como o usuário falou, ou o código do fornecedor (ex: 'microfibra', 'trilho max duplo', '6501').",
+          },
+          fornecedor: {
+            type: "STRING",
+            description:
+              "Nome do fornecedor, se o usuário disse de quem é (ex: 'Corttex'). Opcional.",
+          },
+          cor: { type: "STRING", description: "Cor, se o usuário disse. Opcional." },
+          largura_m: {
+            type: "NUMBER",
+            description: "Largura do tecido em metros, se o usuário disse (ex: 3.3). Opcional.",
+          },
+        },
+        required: ["material"],
+      },
+    },
+
     // ━━━ NÍVEL 2 — CADASTROS ━━━
+    {
+      name: "atualizar_custo_material",
+      description:
+        "Atualiza o CUSTO que a loja paga por um material do catálogo (ex: o fornecedor avisou um reajuste). Pede confirmação. Exige o material_id devolvido por consultar_custo_material — chame aquela ferramenta primeiro e, se ela devolver vários candidatos, pergunte ao usuário qual antes de prosseguir. Não altera preço de venda nem orçamento já emitido: só o custo. O documento do fornecedor não é reescrito; a correção entra datada de hoje e passa a valer.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          material_id: {
+            type: "STRING",
+            description: "O material_id exato devolvido por consultar_custo_material.",
+          },
+          custo_novo: {
+            type: "NUMBER",
+            description:
+              "O novo custo, na mesma unidade que consultar_custo_material devolveu (por metro, por unidade...).",
+          },
+          motivo: {
+            type: "STRING",
+            description:
+              "Por que mudou, nas palavras do usuário (ex: 'fornecedor avisou reajuste por telefone'). Opcional, mas ajuda muito depois.",
+          },
+        },
+        required: ["material_id", "custo_novo"],
+      },
+    },
     {
       name: "cadastrar_produto",
       description:
