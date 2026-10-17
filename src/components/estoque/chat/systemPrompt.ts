@@ -1,5 +1,18 @@
 import type { ChatContextoEstoque } from "./types"
 
+/**
+ * Numero que pode vir nulo do banco.
+ *
+ * `custo_unitario` e `classificacao_abc` sao nulos em TODOS os produtos hoje
+ * (ninguem preencheu custo em estoque_produtos), e um `.toFixed` direto
+ * estourava aqui antes de qualquer ferramenta rodar — o chat inteiro morria
+ * com "Erro ao contatar a IA". Dizer "sem custo" e melhor que travar, e
+ * tambem e melhor que escrever 0,00, que a IA leria como custo de graca.
+ */
+function num(v: number | null | undefined, casas = 2): string {
+  return v === null || v === undefined || Number.isNaN(v) ? "sem dado" : v.toFixed(casas)
+}
+
 export function buildSystemPrompt(contexto: ChatContextoEstoque): string {
   return `Você é a "IA do Estoque" — assistente especializado em gestão de estoque pra uma loja de persianas (Sombrear). Seu papel é ajudar o dono a entender, decidir e operar o estoque dele de forma rápida e prática.
 
@@ -33,7 +46,7 @@ SNAPSHOT ATUAL DO ESTOQUE (gerado em ${contexto.gerado_em})
 
 RESUMO GERAL:
 - Total de produtos ativos: ${contexto.resumo.total_produtos_ativos}
-- Valor total em estoque: R$ ${contexto.resumo.valor_total_estoque.toFixed(2)}
+- Valor total em estoque: R$ ${num(contexto.resumo.valor_total_estoque)}
 - Unidades em estoque: ${contexto.resumo.unidades_em_estoque}
 - Classe A: ${contexto.resumo.produtos_classe_a} produtos
 - Classe B: ${contexto.resumo.produtos_classe_b} produtos
@@ -42,15 +55,15 @@ RESUMO GERAL:
 - Sem localização definida: ${contexto.resumo.produtos_sem_localizacao} produtos
 
 GIRO ANUAL:
-- Giro: ${contexto.giro.giro_reais.toFixed(2)}x ao ano
-- Estoque médio: R$ ${contexto.giro.estoque_atual_reais.toFixed(2)}
-- Vendas últimos 12 meses: R$ ${contexto.giro.vendas_reais_12m.toFixed(2)}
+- Giro: ${num(contexto.giro.giro_reais)}x ao ano
+- Estoque médio: R$ ${num(contexto.giro.estoque_atual_reais)}
+- Vendas últimos 12 meses: R$ ${num(contexto.giro.vendas_reais_12m)}
 
 TOP PRODUTOS POR VALOR EM ESTOQUE:
 ${contexto.top_produtos_por_valor
   .map(
     (p) =>
-      `- [${p.sku}] ${p.nome} — Classe ${p.classificacao_abc} — Estoque: ${p.estoque_atual} — Custo unit.: R$ ${p.custo_unitario.toFixed(2)}`
+      `- [${p.sku}] ${p.nome} — Classe ${p.classificacao_abc ?? "sem classe"} — Estoque: ${p.estoque_atual} — Custo unit.: R$ ${num(p.custo_unitario)}`
   )
   .join("\n")}
 
@@ -73,7 +86,7 @@ ${
     : contexto.produtos_parados
         .map(
           (p) =>
-            `- [${p.sku}] ${p.nome} — ${p.dias_em_estoque} dias parado — R$ ${p.valor_parado_reais.toFixed(2)} empatado`
+            `- [${p.sku}] ${p.nome} — ${p.dias_em_estoque} dias parado — R$ ${num(p.valor_parado_reais)} empatado`
         )
         .join("\n")
 }
