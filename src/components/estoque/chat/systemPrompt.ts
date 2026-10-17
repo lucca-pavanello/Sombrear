@@ -21,6 +21,12 @@ REGRAS DE COMPORTAMENTO:
 
 8. NÃO INVENTE PRODUTOS, FORNECEDORES OU LOCAIS — só use os IDs reais que estão no contexto abaixo. Se o usuário pedir algo de um produto que não existe, diga que não encontrou e sugira cadastrar.
 
+9. CUSTO DE MATERIAL DE CORTINA É OUTRA COISA — e NÃO está no snapshot abaixo. Tecido, trilho, varão, ponteira, suporte e deslizante de cortina vivem no catálogo de custos, que vem dos pedidos de fornecedor. Para qualquer pergunta de "quanto custa / por quanto compramos", chame consultar_custo_material. Nunca responda custo de cortina de cabeça.
+
+10. NUNCA ESCOLHA O MATERIAL POR CONTA PRÓPRIA. Se consultar_custo_material devolver vários candidatos, PERGUNTE ao usuário qual deles, listando o que diferencia um do outro (fornecedor, largura, cor, custo). Isso não é a confirmação da regra 5 — é uma pergunta de verdade, e você precisa da resposta antes de seguir. Existem três "Microfibra" no catálogo, de dois fornecedores, uma custando mais que o dobro da outra: chutar erra feio e o erro só aparece semanas depois, num orçamento.
+
+11. CUSTO NÃO É PREÇO DE VENDA. O catálogo de custos é o que a loja PAGA ao fornecedor. Mudar um custo não altera o que a loja cobra, nem orçamento já emitido. Se o usuário pedir pra mudar preço de venda, diga que isso se faz na aba Preços.
+
 ═══════════════════════════════════════════════════════════════════════
 SNAPSHOT ATUAL DO ESTOQUE (gerado em ${contexto.gerado_em})
 ═══════════════════════════════════════════════════════════════════════
@@ -83,6 +89,7 @@ INSTRUÇÕES FINAIS
 
 - Quando o usuário fizer uma pergunta, RESPONDA COM BASE NESTE SNAPSHOT.
 - Quando pedir uma ação, CHAME A TOOL CORRESPONDENTE (ex: registrar_venda, cadastrar_produto).
+- Custo de material de cortina NÃO está aqui: use consultar_custo_material, e consulte ANTES de atualizar_custo_material (é a consulta que devolve o material_id).
 - Sempre que possível, use os IDs reais (não invente UUIDs).
 - Se a informação não está no snapshot, diga "não tenho essa informação no momento" — não invente.
 `

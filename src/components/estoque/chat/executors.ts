@@ -1,11 +1,34 @@
 import { supabase } from "@/lib/supabase"
 import type { NomeTool } from "./tools"
+import { acharMaterial, descrever, type MaterialCandidato } from "@/lib/catalogo/acharMaterial"
+import { gravarCustoManual } from "@/lib/catalogo/gravarCusto"
 
 export interface ResultadoTool {
   sucesso: boolean
   mensagem: string
   dados?: unknown
 }
+
+/** Campos do catálogo de custos que o chat precisa, na ordem do SELECT. */
+const CAMPOS_CUSTO =
+  "item_id, descricao, codigo_fornecedor, fornecedor, fornecedor_id, categoria, cor, largura_m, unidade_canonica, custo_unitario, referencia, data_documento"
+
+interface LinhaCusto extends MaterialCandidato {
+  fornecedor_id: string | null
+  categoria: string
+  referencia: string
+  data_documento: string | null
+}
+
+/**
+ * O que `consultar_custo_material` já mostrou nesta sessão.
+ *
+ * Serve só para o cartão de confirmação dizer "Microfibra 3.00M Bege, da
+ * Corttex: R$ 6,30 → R$ 7,00" em vez de repetir um uuid. O preview é
+ * síncrono e não pode ir ao banco; a gravação em si NUNCA usa este cache,
+ * relê a linha pelo id na hora de escrever.
+ */
+const vistosNaSessao = new Map<string, LinhaCusto>()
 
 export async function executarTool(
   nome: NomeTool,
@@ -22,10 +45,16 @@ export async function executarTool(
 
       case "listar_produtos_classe_a": {
         const limite = (args.limite as number) || 10
+        // Os nomes reais das colunas são codigo/quantidade_atual/
+        // custo_unitario/classificacao_abc. O apelido `sku` existe só na RPC
+        // estoque_chat_contexto, e é por ele que o snapshot chama o produto —
+        // então o alias aqui mantém as duas respostas falando a mesma língua.
         const { data, error } = await supabase
           .from("estoque_produtos")
-          .select("sku, nome, estoque_atual, custo_medio, preco_venda")
-          .eq("classe_abc", "A")
+          .select(
+            "sku:codigo, nome, estoque_atual:quantidade_atual, custo_medio:custo_unitario, preco_venda"
+          )
+          .eq("classificacao_abc", "A")
           .eq("ativo", true)
           .limit(limite)
         if (error) throw error
@@ -77,7 +106,149 @@ export async function executarTool(
         return { sucesso: true, mensagem: "CSV gerado", dados: { csv, total_itens: data.length } }
       }
 
+      case "consultar_custo_material": {
+        const { data, error } = await supabase
+          .from("catalogo_custo_vigente")
+          .select(CAMPOS_CUSTO)
+        if (error) throw error
+
+        const linhas = (data ?? []) as unknown as LinhaCusto[]
+        const r = acharMaterial(linhas, {
+          termo: String(args.material ?? ""),
+          fornecedor: (args.fornecedor as string) ?? null,
+          cor: (args.cor as string) ?? null,
+          larguraM: (args.largura_m as number) ?? null,
+        })
+
+        if (r.tipo === "nenhum") {
+          return { sucesso: false, mensagem: r.mensagem }
+        }
+        if (r.tipo === "ambiguo") {
+          // Devolve a lista nomeada em vez de eleger um. Escolher sozinho
+          // entre as três microfibras do catálogo (R$ 6,30 e R$ 13,90, em
+          // dois fornecedores) erraria dois terços das vezes, e o erro só
+          // apareceria semanas depois num orçamento.
+          for (const c of r.candidatos) vistosNaSessao.set(c.item_id, c as LinhaCusto)
+          return {
+            sucesso: false,
+            mensagem: r.mensagem,
+            dados: {
+              precisa_escolher: true,
+              candidatos: r.candidatos.map((c) => ({
+                material_id: c.item_id,
+                descricao: c.descricao,
+                fornecedor: c.fornecedor,
+                codigo_fornecedor: c.codigo_fornecedor,
+                cor: c.cor,
+                largura_m: c.largura_m,
+                custo_unitario: c.custo_unitario,
+                unidade: c.unidade_canonica,
+              })),
+            },
+          }
+        }
+
+        const m = r.material as LinhaCusto
+        vistosNaSessao.set(m.item_id, m)
+        return {
+          sucesso: true,
+          mensagem: descrever(m),
+          dados: {
+            material_id: m.item_id,
+            descricao: m.descricao,
+            fornecedor: m.fornecedor,
+            codigo_fornecedor: m.codigo_fornecedor,
+            categoria: m.categoria,
+            cor: m.cor,
+            largura_m: m.largura_m,
+            custo_unitario: m.custo_unitario,
+            unidade: m.unidade_canonica,
+            veio_de: m.referencia,
+            data_documento: m.data_documento,
+          },
+        }
+      }
+
       // ━━━ NÍVEL 2 — CADASTROS ━━━
+      case "atualizar_custo_material": {
+        const materialId = String(args.material_id ?? "")
+        const custoNovo = Number(args.custo_novo)
+
+        // Relê a linha pelo id: o cache da sessão serve ao cartão de
+        // confirmação, nunca à gravação.
+        const { data, error } = await supabase
+          .from("catalogo_custo_vigente")
+          .select(CAMPOS_CUSTO)
+          .eq("item_id", materialId)
+        if (error) throw error
+
+        const atual = (data ?? [])[0] as unknown as LinhaCusto | undefined
+        if (!atual) {
+          return {
+            sucesso: false,
+            mensagem:
+              "Esse material não está mais no custo vigente — provavelmente alguém mexeu nele agora. " +
+              "Consulte de novo antes de alterar.",
+          }
+        }
+        if (!atual.fornecedor_id) {
+          return {
+            sucesso: false,
+            mensagem: `"${atual.descricao}" está sem fornecedor no catálogo, e o custo é por fornecedor. Corrija pela tela de Custos.`,
+          }
+        }
+
+        const custoAntes = atual.custo_unitario
+        await gravarCustoManual({
+          fornecedorId: atual.fornecedor_id,
+          fornecedorNome: atual.fornecedor ?? "",
+          codigoFornecedor: atual.codigo_fornecedor,
+          descricao: atual.descricao,
+          categoria: atual.categoria,
+          cor: atual.cor,
+          larguraM: atual.largura_m,
+          custoUnitario: custoNovo,
+          unidadeCanonica: atual.unidade_canonica as "m" | "m2" | "un" | "kg",
+          motivo: args.motivo
+            ? `Pelo assistente de estoque: ${String(args.motivo)}`
+            : "Alterado pelo assistente de estoque.",
+        })
+
+        // A prova é o estado depois, não a resposta da gravação: relê o
+        // custo vigente e confere que foi ele mesmo que mudou.
+        const { data: depois } = await supabase
+          .from("catalogo_custo_vigente")
+          .select(CAMPOS_CUSTO)
+          .eq("fornecedor_id", atual.fornecedor_id)
+          .eq("descricao", atual.descricao)
+        const confirmado = (depois ?? [])[0] as unknown as LinhaCusto | undefined
+
+        if (!confirmado || Math.abs(confirmado.custo_unitario - custoNovo) > 0.00005) {
+          return {
+            sucesso: false,
+            mensagem:
+              `Gravei, mas ao reler o catálogo o custo vigente de ${atual.descricao} ` +
+              `não ficou ${custoNovo}. NÃO diga que deu certo — peça para conferir na aba Custos.`,
+            dados: { custo_relido: confirmado?.custo_unitario ?? null },
+          }
+        }
+
+        vistosNaSessao.set(confirmado.item_id, confirmado)
+        return {
+          sucesso: true,
+          mensagem:
+            `${atual.descricao} (${atual.fornecedor}): ${custoAntes} → ${custoNovo} ` +
+            `por ${atual.unidade_canonica}. Confirmado no catálogo.`,
+          dados: {
+            descricao: atual.descricao,
+            fornecedor: atual.fornecedor,
+            custo_antes: custoAntes,
+            custo_depois: confirmado.custo_unitario,
+            unidade: atual.unidade_canonica,
+          },
+        }
+      }
+
       case "cadastrar_produto": {
         const { data, error } = await supabase
           .from("estoque_produtos")
@@ -233,6 +404,30 @@ export function gerarPreviewAcao(
   args: Record<string, unknown>
 ): string {
   switch (toolName) {
+    case "atualizar_custo_material": {
+      const m = vistosNaSessao.get(String(args.material_id ?? ""))
+      const novo = Number(args.custo_novo)
+      if (!m) {
+        // Não conferiu o material antes: diz isso em vez de fingir que sabe
+        // qual é. O usuário pode cancelar e pedir a consulta.
+        return (
+          `Alterar custo de material:\n- Material: (não consultado antes — confira na aba Custos)\n` +
+          `- Novo custo: R$ ${novo.toFixed(4)}` +
+          `${args.motivo ? `\n- Motivo: ${args.motivo}` : ""}`
+        )
+      }
+      const unid = m.unidade_canonica
+      return (
+        `Alterar custo de ${m.descricao}` +
+        `${m.cor ? ` (${m.cor})` : ""}:\n` +
+        `- Fornecedor: ${m.fornecedor ?? "—"}\n` +
+        `- Hoje: R$ ${m.custo_unitario.toFixed(4)} por ${unid}, de ${m.referencia}\n` +
+        `- Novo: R$ ${novo.toFixed(4)} por ${unid}` +
+        `${args.motivo ? `\n- Motivo: ${args.motivo}` : ""}\n\n` +
+        `Isto muda o que a loja PAGA. Não altera preço de venda nem orçamento já emitido.`
+      )
+    }
+
     case "cadastrar_produto":
       return `Cadastrar produto:\n- SKU: ${args.sku}\n- Nome: ${args.nome}\n- Tipo: ${args.tipo}\n- Unidade: ${args.unidade}`
 
