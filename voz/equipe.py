@@ -5,7 +5,9 @@ sai sempre do motor do Dash (voz/orcamento/servidor.ts → src/lib/voz/orcar.ts)
 
 Rodar (bancada):
     npx tsx voz/orcamento/servidor.ts <pasta-da-foto-de-precos>   # em outro terminal
+    uv run --group local python local/servidor_voz.py             # ouvir e falar (fase 2), outro terminal
     uv run equipe.py console --text                                # conversar digitando
+    uv run equipe.py console                                       # conversar pelo microfone
 """
 
 from __future__ import annotations
@@ -19,14 +21,18 @@ from typing import Literal
 import aiohttp
 from dotenv import load_dotenv
 from livekit import agents
-from livekit.agents import Agent, AgentServer, AgentSession, ChatContext, RunContext, ToolError, function_tool
+from livekit.agents import Agent, AgentServer, AgentSession, ChatContext, RunContext, ToolError, function_tool, tts
+from livekit.plugins import openai, silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agenda import FUSO
+from frases import TrechosCurtos
 from modelo import criar_llm
 
 load_dotenv(".env.local")
 
 URL_ORCAMENTO = os.environ.get("URL_ORCAMENTO", "http://127.0.0.1:8791")
+URL_VOZ = os.environ.get("URL_VOZ", "http://127.0.0.1:8792/v1")  # local/servidor_voz.py
 CONHECIMENTO = Path(__file__).parent / "conhecimento"
 DIAS = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
 
@@ -157,14 +163,28 @@ class AmandaEquipe(Agent):
         return json.dumps(await _chamar("/tecidos" + q), ensure_ascii=False)
 
 
+def criar_sessao() -> AgentSession:
+    """Ouvir (Parakeet) e falar (Kokoro, voz J) na própria máquina; o turno é do VAD + detector."""
+    return AgentSession(
+        stt=openai.STT(model="parakeet", language="pt", base_url=URL_VOZ, api_key="local", use_realtime=False),
+        llm=criar_llm(),
+        tts=tts.StreamAdapter(
+            tts=openai.TTS(model="kokoro", voice="amanda", base_url=URL_VOZ, api_key="local", response_format="wav"),
+            sentence_tokenizer=TrechosCurtos()),
+        vad=silero.VAD.load(),
+        turn_detection=MultilingualModel(),
+    )
+
+
 server = AgentServer()
 
 
 @server.rtc_session(agent_name="sombrear-equipe")
 async def conversar(ctx: agents.JobContext) -> None:
-    session = AgentSession(llm=criar_llm())  # STT e TTS entram na fase 2
+    session = criar_sessao()
     await session.start(room=ctx.room, agent=AmandaEquipe())
-    await session.generate_reply(instructions="Cumprimente curto e pergunte em que pode ajudar.")
+    # fala fixa: o Muse recusa pedido sem mensagem de usuário, e assim a voz sai na hora
+    await session.say("Oi, aqui é a Amanda. Em que posso ajudar?")
 
 
 if __name__ == "__main__":

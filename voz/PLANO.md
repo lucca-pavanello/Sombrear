@@ -26,8 +26,13 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
    que ela faz para montar um orçamento), respondendo a equipe. Orçamento sempre pelo motor do
    Dash (`src/lib/simulador.ts` para persiana, `src/lib/cortina.ts` para cortina), nunca conta do
    modelo. Pronto quando acertar ao centavo as perguntas de teste que a equipe faria.
-2. **Voz no computador**: ouvir, falar, saber a vez de cada um; conversar com ela pelo microfone.
-   Voz provisória: Kokoro "J" (pf_dora 50% + if_sara 25% + pm_alex 25%), corrigir "Decor".
+2. **Voz no computador** (montada em 17/10, falta o Lucca conversar pelo microfone): ouvir,
+   falar, saber a vez de cada um. Ouvir: Parakeet v3 na CPU. Falar: Kokoro "J" (pf_dora 50% +
+   if_sara 25% + pm_alex 25%), "Decor" corrigido, fala cortada em vírgula. Vez: Silero + detector
+   de turno do LiveKit. Tempo até começar a falar, medido no PC: ~3,5 a 4,5 s em pergunta simples
+   (fim de fala 0,5 + ouvir 0,3 a 0,9 + Muse 2 a 3 até o 1º token + 1º trecho 0,6 a 1,9). Pergunta
+   de orçamento faz duas idas ao modelo (ferramenta no meio): 5 a 7 s. Meta de conversa natural é
+   menos de 1,5 s: o gargalo agora é o Muse.
 3. **Ligação de teste**: servidor, número de teste, ligar do celular; gravação e transcrição.
 4. **Crescer aos poucos**: a mesma Amanda ganhando uma coisa por vez (agenda de visitas, que já
    está pronta na 0031; aviso à equipe; o que mais for pedido).
@@ -59,3 +64,6 @@ todo mês, mais custo por ligação.
 3. O fixo (17) 3304-1354: a IA atende só quando ninguém pega (desvio) ou sempre, passando para a
    loja quando precisa? Portar o número ou desviar para um número SIP?
 4. Ligação ativa: quais das cinco a loja topa, e em que horário.
+5. Cérebro mais rápido na voz: o Muse leva 2 a 3 s até a primeira palavra (com raciocínio
+   "minimal"; sem ele, 5 a 9 s). Ficar no Muse e disfarçar ("deixa eu calcular" gravado antes da
+   conta) ou testar um modelo rápido só para a voz (custo novo)?

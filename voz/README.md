@@ -24,6 +24,9 @@ cp .env.example .env.local                                 # META_API_KEY = META
 npx tsx voz/orcamento/servidor.ts <pasta-da-foto-de-precos>  # na raiz do Dash, outro terminal
 uv run pytest                                              # 11 conversas com o modelo de verdade
 uv run equipe.py console --text                            # conversar com a Amanda digitando
+uv run --group local python local/servidor_voz.py         # ouvir e falar na máquina (KOKORO_DIR)
+uv run --group local equipe.py console                     # conversar pelo microfone
+PYTHONPATH=. uv run --group local python local/medir_latencia.py <pasta-com-wavs>  # tempo por etapa
 ```
 
 A foto dos preços é um JSON por tabela `precos_*` (mais `precos_tecido_modelos`), lido só para
@@ -47,16 +50,19 @@ Os outros 10:
 | Orquestrador | LiveKit Agents, autohospedado | 0 |
 | Entender | Muse (Meta) por API, a chave do Dash | centavos por conversa |
 | Falar (TTS) | Kokoro, voz "J" (pf_dora 50% + if_sara 25% + pm_alex 25%) | 0 |
-| Ouvir (STT) | faster-whisper ou Parakeet na CPU (a medir) | 0 |
+| Ouvir (STT) | Parakeet TDT 0.6b v3 int8 na CPU (`local/servidor_voz.py`) | 0 |
 | Telefone | LiveKit SIP + número DDD 17 | ~US$ 1 a 4/mês + minuto |
 
 Medido em 17/10/2026 no PC (Ryzen 5 1600, sem GPU): Kokoro leva 1,3 a 2 s por frase curta (o
 modelo int8 ficou mais lento); Pocket TTS 0,35 s e Piper 0,2 s até o primeiro som. A velocidade do
-Kokoro depende de onde a voz rodar.
+Kokoro depende de onde a voz rodar; por isso a fala vai cortada em vírgula (`frases.py`): o 1º
+trecho sai em 0,6 a 1,9 s. Ouvir: Parakeet 0,3 a 0,85 s por pergunta e acertou "1,80 por 1,20";
+Whisper small 5,5 a 7 s (codifica sempre 30 s), Whisper base 1,4 s mas errou as medidas. O Muse
+leva 2 a 3 s até a primeira palavra e hoje é o gargalo.
 
 ## Etapas
 
 1. [x] Cérebro da Amanda por texto: orçamento pelo motor do Dash, conhecimento do WhatsApp, 6 conversas testadas.
-2. [ ] Voz no computador: ouvir, falar com a voz J, medir o tempo de resposta.
+2. [~] Voz no computador: montada e medida (3,5 a 4,5 s até começar a falar); falta conversar pelo microfone.
 3. [ ] Ligação de teste pelo celular.
 4. [ ] Crescer aos poucos (agenda já pronta).
