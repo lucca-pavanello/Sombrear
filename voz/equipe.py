@@ -1,0 +1,171 @@
+"""Amanda da equipe: a mesma Amanda do WhatsApp, respondendo a equipe da loja pela voz.
+
+Fase 1 do PLANO.md. Tira dúvida de produto, indica modelo por ambiente e monta orçamento. O número
+sai sempre do motor do Dash (voz/orcamento/servidor.ts → src/lib/voz/orcar.ts), nunca do modelo.
+
+Rodar (bancada):
+    npx tsx voz/orcamento/servidor.ts <pasta-da-foto-de-precos>   # em outro terminal
+    uv run equipe.py console --text                                # conversar digitando
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Literal
+
+import aiohttp
+from dotenv import load_dotenv
+from livekit import agents
+from livekit.agents import Agent, AgentServer, AgentSession, ChatContext, RunContext, ToolError, function_tool
+
+from agenda import FUSO
+from modelo import criar_llm
+
+load_dotenv(".env.local")
+
+URL_ORCAMENTO = os.environ.get("URL_ORCAMENTO", "http://127.0.0.1:8791")
+CONHECIMENTO = Path(__file__).parent / "conhecimento"
+DIAS = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+
+Modelo = Literal["Rolo", "Rolo Motorizado", "Double", "Romana", "PV", "PH_Aluminio", "PH_50"]
+
+
+def conhecimento() -> str:
+    partes = []
+    for nome, titulo in [("produto", "PRODUTO"), ("ambientes", "AMBIENTES"), ("catalogo", "CATÁLOGO"),
+                         ("empresa", "A EMPRESA"), ("objecoes", "PREÇO E OBJEÇÕES")]:
+        texto = (CONHECIMENTO / f"{nome}.md").read_text(encoding="utf-8")
+        texto = "\n".join(l for l in texto.splitlines() if not l.startswith("<!--"))
+        partes.append(f"## {titulo}\n{texto.strip()}")
+    return "\n\n".join(partes)
+
+
+def instrucoes(agora: datetime) -> str:
+    return f"""Você é a Amanda, da Sombrear Decor (cortinas e persianas sob medida em São José do Rio
+Preto, desde 1982). Agora você está conversando POR VOZ com alguém da EQUIPE da loja, não com
+cliente. Ajude com dúvida de produto, indicação por ambiente e orçamento.
+
+Agora é {DIAS[agora.weekday()]}, {agora:%d/%m/%Y %H:%M}.
+
+# Como falar (é voz)
+- Frases curtas, direto ao ponto, tom de colega de trabalho. Nada de lista, emoji, asterisco ou
+  símbolo: tudo vira fala.
+- Valores do jeito falado: "quinhentos e quarenta e nove reais e setenta centavos".
+- Medidas do jeito falado: "um metro e oitenta por um e vinte".
+
+# Orçamento
+- NUNCA faça conta de cabeça nem invente valor: use orcar_persiana ou orcar_cortina e fale o que
+  a ferramenta devolver.
+- Para orçar precisa de: modelo, largura e altura (qual é qual), se a medida é do VÃO ou já da
+  persiana, quantidade e o tecido ou o tipo de tecido. Pergunte só o que faltar, uma coisa por vez.
+  Se a pessoa já disse tudo, calcule na hora.
+- Medida do vão: mande medida_do_vao verdadeiro e a medida como foi dita; a ferramenta soma os
+  aumentos da loja.
+- Tipo sem nome de tecido (blackout, decorativo): mande tipo_tecido e diga "a partir de". Tela
+  solar sem porcentagem: pergunte se é 1% ou 3% antes de calcular.
+- Persiana vertical (PV): calcule pelo mais barato e avise que tem outras linhas.
+- Se der erro de largura maior que o rolo, proponha dividir em peças (quantidade N, largura
+  dividida por N) e calcule assim se a pessoa concordar.
+- Fale o valor em até 4x e o à vista, e a instalação se vier. Para a equipe você pode dizer qual
+  tecido foi considerado.
+- Bandô é opcional: só inclua se pedirem.
+- Cortina: a precificação ainda está sendo ajustada pela loja; quando calcular, diga que é uma
+  prévia para conferir.
+
+# O que você sabe
+{conhecimento()}
+"""
+
+
+async def _chamar(caminho: str, corpo: dict | None = None) -> dict:
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+            if corpo is None:
+                async with s.get(URL_ORCAMENTO + caminho) as r:
+                    return await r.json()
+            async with s.post(URL_ORCAMENTO + caminho, json=corpo) as r:
+                return await r.json()
+    except (aiohttp.ClientError, TimeoutError) as e:
+        raise ToolError(f"Calculadora fora do ar ({type(e).__name__}). Não dê valor.") from e
+
+
+def _opcional(valor: str | None, validos: set[str], padrao: str | None) -> str | None:
+    """O Muse às vezes manda a palavra "null" no lugar de deixar vazio: o código absorve isso."""
+    v = (valor or "").strip()
+    if v.lower() in ("", "null", "none"):
+        return padrao
+    return v if v in validos else padrao
+
+
+TIPOS = {"blackout", "decorativo", "tela_solar_1", "tela_solar_3"}
+ACABAMENTOS = {"nenhum", "bando_branco", "bando_preto", "barra", "kit_box"}
+
+
+def _resultado(r: dict) -> str:
+    if not r.get("ok"):
+        raise ToolError(json.dumps({"erro": r.get("erro"), "sugestoes": r.get("sugestoes")}, ensure_ascii=False))
+    return json.dumps({k: r[k] for k in ("tecido", "maisBarato", "largura", "altura", "total4x",
+                                         "totalAvista", "instalacao", "observacoes")},
+                      ensure_ascii=False)
+
+
+class AmandaEquipe(Agent):
+    def __init__(self, agora: datetime | None = None, chat_ctx: ChatContext | None = None) -> None:
+        super().__init__(instructions=instrucoes(agora or datetime.now(FUSO)), chat_ctx=chat_ctx)
+
+    @function_tool()
+    async def orcar_persiana(self, context: RunContext, modelo: Modelo, largura: float, altura: float,
+                             medida_do_vao: bool, quantidade: int = 1, tecido: str = "",
+                             tipo_tecido: str = "", acabamento: str = "nenhum",
+                             cor_ferragem: str = "BRANCA", incluir_instalacao: bool = True) -> str:
+        """Calcula o orçamento de persiana pelo motor do Dash. largura e altura em metros (1.8).
+        tecido: nome exato (de listar_tecidos) ou vazio para o mais barato do tipo_tecido.
+        tipo_tecido: blackout, decorativo, tela_solar_1 ou tela_solar_3 (vazio = qualquer).
+        acabamento: nenhum, bando_branco, bando_preto, barra ou kit_box. cor_ferragem: BRANCA ou PRETA."""
+        r = await _chamar("/persiana", {
+            "modelo": modelo, "largura": largura, "altura": altura, "medidaDoVao": medida_do_vao,
+            "quantidade": quantidade, "tecido": _opcional(tecido, {tecido.strip()}, None),
+            "tipoTecido": _opcional(tipo_tecido, TIPOS, None),
+            "acabamento": _opcional(acabamento, ACABAMENTOS, "nenhum"),
+            "corFerragem": _opcional((cor_ferragem or "").upper(), {"BRANCA", "PRETA"}, "BRANCA"),
+            "incluirInstalacao": incluir_instalacao})
+        return _resultado(r)
+
+    @function_tool()
+    async def orcar_cortina(self, context: RunContext, largura: float, altura: float, medida_do_vao: bool,
+                            tecido: str, suporte: Literal["trilho_simples", "trilho_duplo", "varao_simples", "varao_duplo"],
+                            modelo: Literal["wave", "pregas", "franzida"] = "wave", forro: str = "",
+                            quantidade: int = 1, porta: bool = False) -> str:
+        """Calcula a prévia de cortina pelo motor do Dash. tecido e forro: nomes de listar_tecidos sem modelo."""
+        r = await _chamar("/cortina", {
+            "largura": largura, "altura": altura, "medidaDoVao": medida_do_vao, "tecido": tecido,
+            "suporte": suporte, "modelo": modelo, "forro": _opcional(forro, {forro.strip()}, None),
+            "quantidade": quantidade,
+            "porta": porta})
+        return _resultado(r)
+
+    @function_tool()
+    async def listar_tecidos(self, context: RunContext, modelo: Modelo | None = None,
+                             tipo_tecido: str = "") -> str:
+        """Lista os tecidos de um modelo de persiana (opcionalmente de um tipo). Sem modelo, lista os
+        tecidos e forros de cortina. Use quando perguntarem que tecidos tem ou para achar o nome exato."""
+        tipo = _opcional(tipo_tecido, TIPOS, None)
+        q = "" if modelo is None else f"?modelo={modelo}" + (f"&tipo={tipo}" if tipo else "")
+        return json.dumps(await _chamar("/tecidos" + q), ensure_ascii=False)
+
+
+server = AgentServer()
+
+
+@server.rtc_session(agent_name="sombrear-equipe")
+async def conversar(ctx: agents.JobContext) -> None:
+    session = AgentSession(llm=criar_llm())  # STT e TTS entram na fase 2
+    await session.start(room=ctx.room, agent=AmandaEquipe())
+    await session.generate_reply(instructions="Cumprimente curto e pergunte em que pode ajudar.")
+
+
+if __name__ == "__main__":
+    agents.cli.run_app(server)
