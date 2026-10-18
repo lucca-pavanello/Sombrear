@@ -30,6 +30,11 @@ from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+try:  # vozes pagas do teste às cegas (grupo "local"); o LiveKit exige registrar plugin na abertura
+    from livekit.plugins import cartesia, elevenlabs
+except ImportError:  # pragma: no cover
+    cartesia = elevenlabs = None
+
 from agenda import FUSO
 from frases import TrechosCurtos
 from sem_silencio import (FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia,
@@ -218,11 +223,9 @@ class AmandaEquipe(Agent):
 
 def criar_voz() -> tts.TTS:
     if VOZ == "elevenlabs":
-        from livekit.plugins import elevenlabs
         kw = {"voice_id": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
         return elevenlabs.TTS(model="eleven_flash_v2_5", language="pt", **kw)
     if VOZ == "cartesia":
-        from livekit.plugins import cartesia
         kw = {"voice": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
         return cartesia.TTS(model="sonic-3", language="pt", **kw)
     return tts.StreamAdapter(

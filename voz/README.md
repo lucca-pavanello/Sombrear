@@ -83,6 +83,7 @@ Os outros 10:
 | Orquestrador | LiveKit Agents, autohospedado | 0 |
 | Entender | Muse (Meta) por API, a chave do Dash | centavos por conversa |
 | Falar (TTS) | Kokoro, voz "J" (pf_dora 50% + if_sara 25% + pm_alex 25%) | 0 |
+| Falar no teste da fase 3 | ElevenLabs Flash v2.5, voz Jessica (`cgSgspJ2msm6clMCkdW9`), escolhida às cegas pelo Lucca em 17/10/2026; começa a tocar em 0,27 s | grátis até 10 mil créditos |
 | Ouvir (STT) | Parakeet TDT 0.6b v3 int8 na CPU; fala curta no Canary 1b v2 (português fixo) | 0 |
 | Telefone | LiveKit SIP + número DDD 17 | ~US$ 1 a 4/mês + minuto |
 
