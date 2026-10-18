@@ -5,11 +5,12 @@
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz elevenlabs
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Modo console   # microfone do PC
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Publico equipe # a versao da equipe
+#   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz cartesia    # Ana Paula, pt-BR nativa
 #
 # Chaves (nunca no repo): ~/.secrets/sombrear-meta.env (META_API_KEY_DASH) e, fora do console,
 # ~/.secrets/sombrear-voz.env (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, ELEVEN_API_KEY,
 # CARTESIA_API_KEY, VOZ_ID opcional). Dados: ~/.cache/sombrear-voz (kokoro/ e precos/).
-param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente")
+param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente", [string]$VozId = "")
 $ErrorActionPreference = "Stop"
 
 function Carregar([string]$arq, [hashtable]$troca) {
@@ -29,6 +30,8 @@ elseif ($Modo -notin "console", "download-files") { throw "Falta $chaves com LIV
 
 $dados = "$HOME\.cache\sombrear-voz"
 $env:VOZ = $Voz
+# o VOZ_ID do arquivo de chaves e da ElevenLabs (Jessica); na Cartesia o padrao e a Ana Paula (pt-BR nativa)
+if ($VozId) { $env:VOZ_ID = $VozId } elseif ($Voz -eq "cartesia") { $env:VOZ_ID = "1cf751f6-8749-43ab-98bd-230dd633abdb" }
 $env:PUBLICO = $Publico
 $env:KOKORO_DIR = "$dados\kokoro"
 $env:PYTHONIOENCODING = "utf-8"

@@ -53,7 +53,16 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
      repetindo e pergunta "quer que eu calcule o valor pra te passar?" antes de dar preço. Se o
      cliente pediu o preço, calcula sem enrolar. Fechar ou agendar: passa o WhatsApp da loja e o
      horário, sem dizer que anotou (ainda não há registro da ligação).
-   - Voz brasileira de graça: teste às cegas com as vozes abertas e as grátis.
+     Revisto no mesmo dia com o roteiro da loja: abre com "Boa tarde, Amanda da Sombrear Decor aqui.
+     Como posso te ajudar?"; orçamento e dúvida: entende o caso, pede foto pelo WhatsApp e, se o
+     cliente quiser o preço antes, pede modelo e medidas e fala o valor na ligação; outro assunto:
+     nome completo e telefone. O contato vai para `anotar_contato`, que no teste grava em
+     `~/.cache/sombrear-voz/recados.jsonl`. **Para ir ao ar, o recado tem que chegar no time**
+     (Dash ou WhatsApp da loja), senão a promessa de "o time te chama" não se cumpre.
+   - Voz (18/10): medido no PC, só a Cartesia (pt-BR nativa, ~0,4 s até o 1º som, plano grátis)
+     serve ao vivo; Supertonic 2,6 a 3,2 s, OmniVoice 10 a 30 vezes mais lento que o tempo real e com
+     pesos sem uso comercial, Piper sem voz feminina em pt-BR. Ordem pedida pelo Lucca: primeiro
+     testar a ligação com qualquer voz, a voz final por último (talvez clonada de alguém, com autorização).
 4. **Crescer aos poucos**: a mesma Amanda ganhando uma coisa por vez (agenda de visitas, que já
    está pronta na 0031; aviso à equipe; o que mais for pedido).
 5. **Piloto com cliente** e 6. **frentes abaixo**: mais para frente.
