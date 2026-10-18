@@ -169,6 +169,32 @@ describe('colunas de loja', () => {
       'TAPECARIA AMERICANA DECOR',
     ])
   })
+
+  it('coluna excluída some MESMO tendo preço — e o preço continua lá', () => {
+    // Excluir coluna é esconder coluna. Se esconder dependesse de não ter
+    // preço, "excluir" não funcionaria justamente onde a loja mais quer:
+    // na Alumitec, que tem preço em 27 acessórios. E se apagasse os preços,
+    // levaria junto o histórico que sustenta margem de orçamento antigo.
+    const linhas = pivotarPorFornecedor([
+      custo({ descricao: 'TMSBB-TRILHO MAX SIMPLES', custo_unitario: 5.208, categoria: 'trilho',
+              fornecedor_id: ALUMITEC, fornecedor: 'ALUMITEC ALUMINIO' }),
+    ])
+    const nomes = new Map([[ALUMITEC, 'ALUMITEC ALUMINIO']])
+
+    expect(lojasDe(linhas, nomes, [], [ALUMITEC])).toEqual([])
+    // O custo segue no pivô: só a coluna sumiu.
+    expect(linhas[0].menor!.custo_unitario).toBeCloseTo(5.208, 4)
+  })
+
+  it('excluída ganha de fixada: a última palavra é da loja', () => {
+    const linhas = pivotarPorFornecedor([
+      custo({ descricao: 'Oxford', custo_unitario: 9.5 }),
+    ])
+    const nomes = new Map([[TA_DECOR, 'TAPECARIA AMERICANA DECOR']])
+    expect(lojasDe(linhas, nomes, [TA_DECOR], [TA_DECOR]).map(l => l.nome)).toEqual([
+      'Sem fornecedor',
+    ])
+  })
 })
 
 describe('comprei aqui x mais barato', () => {

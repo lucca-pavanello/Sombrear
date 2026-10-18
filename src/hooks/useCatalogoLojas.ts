@@ -22,16 +22,27 @@ import { SEM_FORNECEDOR } from '@/lib/catalogo/pivo'
  * informar quanto a Tapeçaria Americana cobra por um acessório é preciso que
  * a coluna exista, e sem isto ela só existiria depois do primeiro preço.
  */
+export interface ColunasDoGrupo {
+  /** Lojas que a loja mandou mostrar, mesmo sem preço ainda. */
+  fixadas: string[]
+  /** Lojas que a loja tirou da tela. Têm a palavra final. */
+  ocultas: string[]
+}
+
 export function useColunasFornecedor(grupo: GrupoCatalogo) {
   return useQuery({
     queryKey: ['catalogo-colunas', grupo],
-    queryFn: async (): Promise<string[]> => {
+    queryFn: async (): Promise<ColunasDoGrupo> => {
       const { data, error } = await supabase
         .from('catalogo_colunas_fornecedor')
-        .select('fornecedor_id')
+        .select('fornecedor_id, oculta')
         .eq('grupo', grupo)
       if (error) throw error
-      return (data ?? []).map(l => l.fornecedor_id as string)
+      const linhas = data ?? []
+      return {
+        fixadas: linhas.filter(l => !l.oculta).map(l => l.fornecedor_id as string),
+        ocultas: linhas.filter(l => l.oculta).map(l => l.fornecedor_id as string),
+      }
     },
     staleTime: 60_000,
     retry: 1,
@@ -39,13 +50,22 @@ export function useColunasFornecedor(grupo: GrupoCatalogo) {
   })
 }
 
+/**
+ * Mostrar a coluna. Serve tanto para a loja nova quanto para desfazer uma
+ * exclusão — por isso grava `oculta: false` em vez de só inserir: a linha
+ * de uma coluna escondida já existe, e um insert simples não a traria de
+ * volta.
+ */
 export function useFixarColuna() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { grupo: GrupoCatalogo; fornecedorId: string }) => {
       const { data, error } = await supabase
         .from('catalogo_colunas_fornecedor')
-        .upsert({ grupo: v.grupo, fornecedor_id: v.fornecedorId }, { onConflict: 'grupo,fornecedor_id' })
+        .upsert(
+          { grupo: v.grupo, fornecedor_id: v.fornecedorId, oculta: false },
+          { onConflict: 'grupo,fornecedor_id' }
+        )
         .select('fornecedor_id')
       if (error) throw error
       if (!data || data.length === 0) {
@@ -60,22 +80,76 @@ export function useFixarColuna() {
 }
 
 /**
- * Tirar a coluna não apaga preço nenhum: se a loja tiver item no grupo, a
- * coluna continua aparecendo, porque esconder um custo que existe seria pior
- * que uma coluna a mais. Só some a coluna que estava vazia.
+ * Excluir a coluna = esconder a coluna. Nenhum custo é apagado.
+ *
+ * Apagar os itens para sumir com a coluna destruiria o histórico que faz o
+ * custo ser rastreável: o pedido 115104 continua dizendo que o trilho saiu a
+ * R$ 8,736/m depois de a loja parar de comprar na Alumitec, e aquele número
+ * ainda sustenta a margem de orçamentos já emitidos. Uma tela a menos nunca
+ * deve custar um dado a menos.
  */
-export function useSoltarColuna() {
+export function useOcultarColuna() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (v: { grupo: GrupoCatalogo; fornecedorId: string }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('catalogo_colunas_fornecedor')
-        .delete()
-        .eq('grupo', v.grupo)
-        .eq('fornecedor_id', v.fornecedorId)
+        .upsert(
+          { grupo: v.grupo, fornecedor_id: v.fornecedorId, oculta: true },
+          { onConflict: 'grupo,fornecedor_id' }
+        )
+        .select('fornecedor_id')
       if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error(
+          'O banco não confirmou a gravação, então a coluna NÃO foi escondida. ' +
+            'Pode ser falta de permissão de administrador.'
+        )
+      }
     },
     onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['catalogo-colunas', v.grupo] }),
+  })
+}
+
+/**
+ * Renomear a loja. O nome é do FORNECEDOR, não da coluna: ele muda junto no
+ * cadastro de fornecedores, nos lotes e em toda tela que mostre esse nome.
+ * Quem chama avisa isso antes.
+ */
+export function useRenomearLoja() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: { fornecedorId: string; nome: string }) => {
+      const limpo = v.nome.trim()
+      if (!limpo) throw new Error('O nome da loja não pode ficar vazio.')
+
+      const { data: existentes, error: eBusca } = await supabase
+        .from('estoque_fornecedores')
+        .select('id, nome')
+        .ilike('nome', limpo)
+      if (eBusca) throw eBusca
+      if (existentes?.some(f => f.id !== v.fornecedorId)) {
+        throw new Error(`Já existe outra loja chamada "${limpo}".`)
+      }
+
+      const { data, error } = await supabase
+        .from('estoque_fornecedores')
+        .update({ nome: limpo })
+        .eq('id', v.fornecedorId)
+        .select('id')
+      if (error) throw error
+      if (!data || data.length === 0) {
+        throw new Error(
+          'O banco não confirmou a gravação, então o nome NÃO mudou. ' +
+            'Pode ser falta de permissão de administrador.'
+        )
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['catalogo-fornecedores'] })
+      // O nome do fornecedor viaja dentro da view de custo vigente.
+      qc.invalidateQueries({ queryKey: ['catalogo-custo-vigente'] })
+    },
   })
 }
 

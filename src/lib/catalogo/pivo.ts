@@ -151,14 +151,22 @@ export function ordenar(linhas: MaterialPivotado[], ordem: Ordem): MaterialPivot
  * Americana em acessórios é preciso que a coluna exista, e sem fixar ela só
  * existiria depois do primeiro preço. Por isso a união, e não só o que tem
  * dado — uma coluna inteira vazia aqui é um convite a preencher, não um erro.
+ *
+ * `ocultas` tem a palavra final, inclusive sobre loja que tem preço: excluir
+ * a coluna esconde a coluna e NÃO apaga custo. O pedido 115104 continua
+ * dizendo que o trilho saiu a R$ 8,736/m depois de a loja parar de comprar
+ * na Alumitec, e apagar o item para sumir com a coluna levaria junto a
+ * rastreabilidade e a margem de orçamentos antigos.
  */
 export function lojasDe(
   linhas: MaterialPivotado[],
   nomePorId: Map<string, string | null>,
-  fixadas: readonly string[] = []
+  fixadas: readonly string[] = [],
+  ocultas: readonly string[] = []
 ): { id: string; nome: string }[] {
   const vistas = new Set<string>(fixadas)
   for (const l of linhas) for (const id of l.porFornecedor.keys()) vistas.add(id)
+  for (const id of ocultas) vistas.delete(id)
   return [...vistas]
     .map(id => ({ id, nome: (id && nomePorId.get(id)) || 'Sem fornecedor' }))
     .sort((a, b) =>

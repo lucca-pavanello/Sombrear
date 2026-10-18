@@ -21,6 +21,7 @@ import {
   useColunasFornecedor, useCompraEscolhida, useMarcarCompra,
 } from '@/hooks/useCatalogoLojas'
 import AdicionarLojaColuna from './AdicionarLojaColuna'
+import CabecalhoLoja from './CabecalhoLoja'
 import {
   pivotarPorFornecedor, ordenar, lojasDe, pagandoAMais, ROTULO_ORDEM, SEM_FORNECEDOR,
   type MaterialPivotado, type Ordem,
@@ -89,7 +90,7 @@ export default function CatalogoCustosView({ toast }: Props) {
   const [edicao, setEdicao] = useState<Edicao | null>(null)
   const [novaLoja, setNovaLoja] = useState(false)
 
-  const { data: fixadas = [] } = useColunasFornecedor(grupo)
+  const { data: colunasLoja } = useColunasFornecedor(grupo)
   const { data: compraEscolhida } = useCompraEscolhida()
   const marcarCompra = useMarcarCompra()
 
@@ -111,11 +112,24 @@ export default function CatalogoCustosView({ toast }: Props) {
     [fornecedoresCadastrados]
   )
 
-  /** As colunas: as lojas com preço neste grupo, mais as que a loja fixou. */
+  /**
+   * As colunas: as lojas com preço neste grupo, mais as fixadas, menos as
+   * que a loja excluiu. Excluída tem a palavra final — e nenhum custo foi
+   * apagado para isso.
+   */
   const lojas = useMemo(
-    () => lojasDe(doGrupo, nomePorId, fixadas),
-    [doGrupo, nomePorId, fixadas]
+    () => lojasDe(doGrupo, nomePorId, colunasLoja?.fixadas, colunasLoja?.ocultas),
+    [doGrupo, nomePorId, colunasLoja]
   )
+
+  /** Quantos materiais têm preço em cada loja — a confirmação de excluir usa. */
+  const comPrecoPorLoja = useMemo(() => {
+    const conta = new Map<string, number>()
+    for (const m of doGrupo) {
+      for (const id of m.porFornecedor.keys()) conta.set(id, (conta.get(id) ?? 0) + 1)
+    }
+    return conta
+  }, [doGrupo])
 
   const categorias = useMemo(() => {
     const vistas = new Map<string, number>()
@@ -166,7 +180,21 @@ export default function CatalogoCustosView({ toast }: Props) {
     // cálculo usa — e a comparação é o motivo de a tela existir.
     ...lojas.map<EstoqueTableColumn<MaterialPivotado>>(loja => ({
       key: `loja:${loja.id}`,
-      header: loja.nome,
+      // "Sem fornecedor" não é loja: não tem cadastro para renomear, e
+      // escondê-la sumiria com o único custo dos 11 tecidos da lista da
+      // dona. Fica como rótulo simples até alguém dizer de quem são.
+      header:
+        loja.id === SEM_FORNECEDOR ? (
+          loja.nome
+        ) : (
+          <CabecalhoLoja
+            grupo={grupo}
+            fornecedorId={loja.id}
+            nome={loja.nome}
+            comPreco={comPrecoPorLoja.get(loja.id) ?? 0}
+            toast={toast}
+          />
+        ),
       align: 'right',
       cell: m => {
         const c = m.porFornecedor.get(loja.id)
