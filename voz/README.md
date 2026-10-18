@@ -61,7 +61,8 @@ powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz elevenlabs
 powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz cartesia
 ```
 No celular: entrar em cloud.livekit.io, Agents > Console > Configure, em "Agent name" pôr
-`sombrear-equipe`, "Save and start session" e falar (o Console só lista agentes hospedados no
+`sombrear-cliente` (Amanda atendendo cliente, padrão) ou `sombrear-equipe` (com `-Publico equipe`),
+"Save and start session" e falar (o Console só lista agentes hospedados no
 LiveKit; a Amanda roda no PC, por isso o nome vai digitado). Ctrl+C no PC encerra tudo. Para escolher a voz da
 paga: `VOZ=elevenlabs uv run --group local python local/listar_vozes.py` e pôr o id em `VOZ_ID`
 no mesmo arquivo de chaves. O script lê os preços e o modelo do Kokoro de `~/.cache/sombrear-voz`

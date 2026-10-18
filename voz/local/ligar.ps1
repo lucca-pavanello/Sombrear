@@ -4,11 +4,12 @@
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1                 # Kokoro, pelo LiveKit Cloud
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz elevenlabs
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Modo console   # microfone do PC
+#   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Publico equipe # a versao da equipe
 #
 # Chaves (nunca no repo): ~/.secrets/sombrear-meta.env (META_API_KEY_DASH) e, fora do console,
 # ~/.secrets/sombrear-voz.env (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, ELEVEN_API_KEY,
 # CARTESIA_API_KEY, VOZ_ID opcional). Dados: ~/.cache/sombrear-voz (kokoro/ e precos/).
-param([string]$Voz = "kokoro", [string]$Modo = "dev")
+param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente")
 $ErrorActionPreference = "Stop"
 
 function Carregar([string]$arq, [hashtable]$troca) {
@@ -28,6 +29,7 @@ elseif ($Modo -notin "console", "download-files") { throw "Falta $chaves com LIV
 
 $dados = "$HOME\.cache\sombrear-voz"
 $env:VOZ = $Voz
+$env:PUBLICO = $Publico
 $env:KOKORO_DIR = "$dados\kokoro"
 $env:PYTHONIOENCODING = "utf-8"
 $pastaVoz = Split-Path $PSScriptRoot -Parent
@@ -50,7 +52,7 @@ try {
         }
         if (-not $ok) { throw "Servidor nao subiu: $url (logs em $logs)" }
     }
-    Write-Host "Pronto. Voz: $Voz. Modo: $Modo."
+    Write-Host "Pronto. Voz: $Voz. Modo: $Modo. Publico: $Publico (agente sombrear-$Publico)."
     Set-Location $pastaVoz
     uv run --group local equipe.py $Modo
 }

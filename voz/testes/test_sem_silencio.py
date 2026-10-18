@@ -164,3 +164,4 @@ def test_frase_do_valor_tem_a_instalacao_separada() -> None:
                              "cinco reais de instalação.")
     assert "instalação" not in para_falar({**r, "instalacao": None})
     assert para_falar({"total4x": 1589.0, "totalAvista": 1509.55, "instalacao": None}).startswith("mil quinhentos")
+    assert para_falar({**r, "maisBarato": True}).startswith("a partir de setecentos")

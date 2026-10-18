@@ -46,6 +46,14 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
    Lucca testou pelo celular e aprovou. Para ir ao ar falta: número DDD 17 (Twilio US$ 4,25/mês ou
    SIP brasileiro), servidor fora do PC, voz brasileira nativa (US$ 5 de crédito na ElevenLabs
    libera) e gravação/transcrição das ligações.
+   **Antes de ir ao ar, rodada de melhorias** (pedido do Lucca em 18/10, começada no mesmo dia):
+   - Amanda atendendo CLIENTE (`PUBLICO=cliente`, padrão; a da equipe segue com `PUBLICO=equipe`).
+     O jeito da casa vem do prompt do WhatsApp (n8n). Ela abre com "Bom dia, tudo bem? Aqui é a
+     Amanda, da Sombrear Decor. Como posso te ajudar?", pergunta o nome e o cômodo, confere a medida
+     repetindo e pergunta "quer que eu calcule o valor pra te passar?" antes de dar preço. Se o
+     cliente pediu o preço, calcula sem enrolar. Fechar ou agendar: passa o WhatsApp da loja e o
+     horário, sem dizer que anotou (ainda não há registro da ligação).
+   - Voz brasileira de graça: teste às cegas com as vozes abertas e as grátis.
 4. **Crescer aos poucos**: a mesma Amanda ganhando uma coisa por vez (agenda de visitas, que já
    está pronta na 0031; aviso à equipe; o que mais for pedido).
 5. **Piloto com cliente** e 6. **frentes abaixo**: mais para frente.
@@ -72,7 +80,7 @@ todo mês, mais custo por ligação.
 ## Decisões em aberto
 
 1. Voz: aceitar pagar pela voz se a aberta perder no teste às cegas?
-2. Quando perguntarem se é robô, o que a Amanda responde?
+2. ~~Quando perguntarem se é robô~~: igual ao WhatsApp, "Sou a assistente virtual da Sombrear..." (18/10).
 3. O fixo (17) 3304-1354: a IA atende só quando ninguém pega (desvio) ou sempre, passando para a
    loja quando precisa? Portar o número ou desviar para um número SIP?
 4. Ligação ativa: quais das cinco a loja topa, e em que horário.
