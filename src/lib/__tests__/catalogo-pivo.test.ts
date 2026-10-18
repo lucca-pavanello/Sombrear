@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  chaveMaterial, pivotarPorFornecedor, ordenar, lojasDe, SEM_FORNECEDOR,
+  chaveMaterial, pivotarPorFornecedor, ordenar, lojasDe, pagandoAMais, SEM_FORNECEDOR,
 } from '../catalogo/pivo'
 import type { CustoVigente } from '@/hooks/useCatalogoCustos'
 
@@ -149,5 +149,88 @@ describe('colunas de loja', () => {
       'TAPECARIA AMERICANA DECOR',
       'Sem fornecedor',
     ])
+  })
+
+  it('loja fixada vira coluna mesmo sem ter nenhum preço ainda', () => {
+    // O pedido de 18/10: a Tapeçaria Americana tem que aparecer em
+    // acessórios, onde ela ainda não vendeu nada, para a dona poder digitar
+    // o primeiro preço. Sem isto, a coluna só existiria depois do preço —
+    // e o preço só poderia ser digitado na coluna.
+    const linhas = pivotarPorFornecedor([
+      custo({ descricao: 'TMSBB-TRILHO MAX SIMPLES', custo_unitario: 5.208, categoria: 'trilho',
+              fornecedor_id: ALUMITEC, fornecedor: 'ALUMITEC ALUMINIO' }),
+    ])
+    const nomes = new Map([
+      [ALUMITEC, 'ALUMITEC ALUMINIO'],
+      [TA_DECOR, 'TAPECARIA AMERICANA DECOR'],
+    ])
+    expect(lojasDe(linhas, nomes, [TA_DECOR]).map(l => l.nome)).toEqual([
+      'ALUMITEC ALUMINIO',
+      'TAPECARIA AMERICANA DECOR',
+    ])
+  })
+
+  it('coluna excluída some MESMO tendo preço — e o preço continua lá', () => {
+    // Excluir coluna é esconder coluna. Se esconder dependesse de não ter
+    // preço, "excluir" não funcionaria justamente onde a loja mais quer:
+    // na Alumitec, que tem preço em 27 acessórios. E se apagasse os preços,
+    // levaria junto o histórico que sustenta margem de orçamento antigo.
+    const linhas = pivotarPorFornecedor([
+      custo({ descricao: 'TMSBB-TRILHO MAX SIMPLES', custo_unitario: 5.208, categoria: 'trilho',
+              fornecedor_id: ALUMITEC, fornecedor: 'ALUMITEC ALUMINIO' }),
+    ])
+    const nomes = new Map([[ALUMITEC, 'ALUMITEC ALUMINIO']])
+
+    expect(lojasDe(linhas, nomes, [], [ALUMITEC])).toEqual([])
+    // O custo segue no pivô: só a coluna sumiu.
+    expect(linhas[0].menor!.custo_unitario).toBeCloseTo(5.208, 4)
+  })
+
+  it('excluída ganha de fixada: a última palavra é da loja', () => {
+    const linhas = pivotarPorFornecedor([
+      custo({ descricao: 'Oxford', custo_unitario: 9.5 }),
+    ])
+    const nomes = new Map([[TA_DECOR, 'TAPECARIA AMERICANA DECOR']])
+    expect(lojasDe(linhas, nomes, [TA_DECOR], [TA_DECOR]).map(l => l.nome)).toEqual([
+      'Sem fornecedor',
+    ])
+  })
+})
+
+describe('comprei aqui x mais barato', () => {
+  const material = pivotarPorFornecedor([
+    custo({ descricao: 'Semi Blact 3 m', custo_unitario: 14.9, fornecedor_id: CORTTEX,
+            fornecedor: 'CORTTEX INDUSTRIA TEXTIL' }),
+    custo({ descricao: 'Semi Blact 3 m', custo_unitario: 16.4, fornecedor_id: TA_DECOR,
+            fornecedor: 'TAPECARIA AMERICANA DECOR' }),
+  ])[0]
+
+  it('avisa quanto custa comprar onde não é o mais barato', () => {
+    const aviso = pagandoAMais(material, TA_DECOR)
+    expect(aviso).not.toBeNull()
+    expect(aviso!.diferenca).toBeCloseTo(1.5, 4)
+    expect(aviso!.menor.fornecedor_id).toBe(CORTTEX)
+  })
+
+  it('não avisa quando a marcada JÁ é a mais barata', () => {
+    expect(pagandoAMais(material, CORTTEX)).toBeNull()
+  })
+
+  it('não avisa quando nada foi marcado', () => {
+    expect(pagandoAMais(material, undefined)).toBeNull()
+  })
+
+  it('não avisa quando a loja marcada ainda não tem preço', () => {
+    // Marcar e só depois digitar o preço é uma ordem possível; até o preço
+    // chegar não há diferença nenhuma para mostrar.
+    expect(pagandoAMais(material, ALUMITEC)).toBeNull()
+  })
+
+  it('marcação NÃO muda o custo do cálculo — ele segue sendo o menor', () => {
+    // A regra da loja de 18/10. O check é registro de onde comprou, não
+    // regra de preço: trocá-los faria o orçamento mudar de valor por causa
+    // de uma marcação feita para organizar a compra.
+    expect(material.menor!.custo_unitario).toBe(14.9)
+    expect(material.menor!.fornecedor_id).toBe(CORTTEX)
   })
 })

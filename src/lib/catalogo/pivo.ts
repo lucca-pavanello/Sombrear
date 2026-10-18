@@ -143,13 +143,30 @@ export function ordenar(linhas: MaterialPivotado[], ordem: Ordem): MaterialPivot
   })
 }
 
-/** As lojas que aparecem nestes materiais, para virarem colunas. */
+/**
+ * As colunas da tabela: as lojas que já têm preço nestes materiais MAIS as
+ * que a loja fixou.
+ *
+ * A fixação quebra um impasse: para informar o primeiro preço da Tapeçaria
+ * Americana em acessórios é preciso que a coluna exista, e sem fixar ela só
+ * existiria depois do primeiro preço. Por isso a união, e não só o que tem
+ * dado — uma coluna inteira vazia aqui é um convite a preencher, não um erro.
+ *
+ * `ocultas` tem a palavra final, inclusive sobre loja que tem preço: excluir
+ * a coluna esconde a coluna e NÃO apaga custo. O pedido 115104 continua
+ * dizendo que o trilho saiu a R$ 8,736/m depois de a loja parar de comprar
+ * na Alumitec, e apagar o item para sumir com a coluna levaria junto a
+ * rastreabilidade e a margem de orçamentos antigos.
+ */
 export function lojasDe(
   linhas: MaterialPivotado[],
-  nomePorId: Map<string, string | null>
+  nomePorId: Map<string, string | null>,
+  fixadas: readonly string[] = [],
+  ocultas: readonly string[] = []
 ): { id: string; nome: string }[] {
-  const vistas = new Set<string>()
+  const vistas = new Set<string>(fixadas)
   for (const l of linhas) for (const id of l.porFornecedor.keys()) vistas.add(id)
+  for (const id of ocultas) vistas.delete(id)
   return [...vistas]
     .map(id => ({ id, nome: (id && nomePorId.get(id)) || 'Sem fornecedor' }))
     .sort((a, b) =>
@@ -157,4 +174,31 @@ export function lojasDe(
       (a.id === SEM_FORNECEDOR ? 1 : 0) - (b.id === SEM_FORNECEDOR ? 1 : 0) ||
       a.nome.localeCompare(b.nome, 'pt-BR')
     )
+}
+
+/**
+ * Quanto a loja paga a mais por comprar onde compra, em vez de onde está
+ * mais barato.
+ *
+ * O custo do cálculo continua sendo o MENOR — foi a regra dita pela loja. A
+ * marcação de "comprei aqui" não muda conta nenhuma; ela existe para que a
+ * tela possa dizer "você compra na TA Decor, mas a Corttex está mais
+ * barata", que é a informação que some quando só existe um dos dois números.
+ * Às vezes compra-se do mais caro de propósito (prazo, frete, estoque), e aí
+ * ver a diferença é o que permite decidir de novo.
+ *
+ * Devolve null quando não há o que avisar: sem marcação, marcada na mais
+ * barata, ou marcada numa loja que ainda não tem preço.
+ */
+export function pagandoAMais(
+  m: MaterialPivotado,
+  escolhida: string | undefined
+): { diferenca: number; escolhido: CustoVigente; menor: CustoVigente } | null {
+  if (escolhida == null || m.menor == null) return null
+  const escolhido = m.porFornecedor.get(escolhida)
+  if (!escolhido || escolhido.item_id === m.menor.item_id) return null
+  // Unidades diferentes não se comparam; o pivô já avisa disso à parte.
+  if (escolhido.unidade_canonica !== m.menor.unidade_canonica) return null
+  const diferenca = escolhido.custo_unitario - m.menor.custo_unitario
+  return diferenca > 0 ? { diferenca, escolhido, menor: m.menor } : null
 }
