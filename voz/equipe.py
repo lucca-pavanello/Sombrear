@@ -40,6 +40,9 @@ load_dotenv(".env.local")
 
 URL_ORCAMENTO = os.environ.get("URL_ORCAMENTO", "http://127.0.0.1:8791")
 URL_VOZ = os.environ.get("URL_VOZ", "http://127.0.0.1:8792/v1")  # local/servidor_voz.py
+# Teste às cegas da fase 3: VOZ=kokoro (padrão, na máquina), elevenlabs ou cartesia; VOZ_ID escolhe a
+# voz da paga (local/listar_vozes.py). As chaves ficam no ~/.secrets, nunca aqui.
+VOZ = os.environ.get("VOZ", "kokoro")
 CONHECIMENTO = Path(__file__).parent / "conhecimento"
 DIAS = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
 
@@ -213,15 +216,27 @@ class AmandaEquipe(Agent):
         return json.dumps(await _chamar("/tecidos" + q), ensure_ascii=False)
 
 
+def criar_voz() -> tts.TTS:
+    if VOZ == "elevenlabs":
+        from livekit.plugins import elevenlabs
+        kw = {"voice_id": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
+        return elevenlabs.TTS(model="eleven_flash_v2_5", language="pt", **kw)
+    if VOZ == "cartesia":
+        from livekit.plugins import cartesia
+        kw = {"voice": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
+        return cartesia.TTS(model="sonic-3", language="pt", **kw)
+    return tts.StreamAdapter(
+        tts=openai.TTS(model="kokoro", voice="amanda", base_url=URL_VOZ, api_key="local", response_format="wav"),
+        sentence_tokenizer=TrechosCurtos())
+
+
 def criar_sessao(turno=None) -> AgentSession:
     """Ouvir (Parakeet/Canary) e falar (Kokoro, voz J) na própria máquina; o turno é do VAD + detector.
     turno: outro detector de fim de fala (a simulação usa "vad": o detector precisa do job)."""
     return AgentSession(
         stt=openai.STT(model="parakeet", language="pt", base_url=URL_VOZ, api_key="local", use_realtime=False),
         llm=criar_llm(),
-        tts=tts.StreamAdapter(
-            tts=openai.TTS(model="kokoro", voice="amanda", base_url=URL_VOZ, api_key="local", response_format="wav"),
-            sentence_tokenizer=TrechosCurtos()),
+        tts=criar_voz(),
         vad=silero.VAD.load(),
         turn_detection=turno or MultilingualModel(),
         # o padrão espera 10 s por tentativa (no teste foram ~50 s mudos); com 5 s e a fala de espera
@@ -234,7 +249,8 @@ def criar_sessao(turno=None) -> AgentSession:
 server = AgentServer()
 
 
-@server.rtc_session(agent_name="sombrear-equipe")
+# sem nome o LiveKit manda a Amanda para qualquer sala nova (Playground no celular, fase 3)
+@server.rtc_session(agent_name=os.environ.get("AGENTE_NOME", ""))
 async def conversar(ctx: agents.JobContext) -> None:
     session = criar_sessao()
     await session.start(room=ctx.room, agent=AmandaEquipe())

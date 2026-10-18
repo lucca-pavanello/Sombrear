@@ -33,6 +33,38 @@ PYTHONPATH=. uv run --group local python local/simular_ligacao.py <wav> [<wav>..
 A foto dos preços é um JSON por tabela `precos_*` (mais `precos_tecido_modelos`), lido só para
 leitura do banco da Sombrear. Fica fora do repo.
 
+## Fase 3: testar pelo celular, de graça
+
+A Amanda roda no PC e o LiveKit Cloud (plano grátis: 1.000 min de agente por mês) leva o áudio
+até o navegador do celular. Sem número de telefone por enquanto: o número DDD 17 só entra no
+piloto. Ligar de um app SIP direto no LiveKit não é garantido (ele não aceita cadastro de app),
+por isso o caminho é o navegador.
+
+**Uma vez só (Lucca):**
+1. Criar conta em cloud.livekit.io e um projeto `sombrear-voz`. Em Settings > API Keys, criar uma
+   chave e anotar a URL do projeto (`wss://...livekit.cloud`), a API Key e o Secret.
+2. (Teste às cegas das vozes) Criar conta grátis na ElevenLabs e na Cartesia e pegar a API key de cada.
+3. Criar `~/.secrets/sombrear-voz.env` com:
+   ```
+   LIVEKIT_URL=wss://...
+   LIVEKIT_API_KEY=...
+   LIVEKIT_API_SECRET=...
+   ELEVEN_API_KEY=...
+   CARTESIA_API_KEY=...
+   ```
+4. No painel do LiveKit, Sandbox > criar o app **Web Voice Agent**. Ele dá um link para abrir no celular.
+
+**Cada teste:**
+```powershell
+powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1                  # voz Kokoro
+powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz elevenlabs
+powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz cartesia
+```
+Abrir o link do Sandbox no celular e falar. Ctrl+C no PC encerra tudo. Para escolher a voz da
+paga: `VOZ=elevenlabs uv run --group local python local/listar_vozes.py` e pôr o id em `VOZ_ID`
+no mesmo arquivo de chaves. O script lê os preços e o modelo do Kokoro de `~/.cache/sombrear-voz`
+(foto dos preços de 17/10/2026; atualizar quando a loja mudar preço).
+
 ## Conferência contra orçamentos reais
 
 `npx tsx voz/orcamento/conferir.ts <pasta-da-foto>` compara com os 88 orçamentos da Amanda do
@@ -65,5 +97,5 @@ leva 2 a 3 s até a primeira palavra e hoje é o gargalo.
 
 1. [x] Cérebro da Amanda por texto: orçamento pelo motor do Dash, conhecimento do WhatsApp, 6 conversas testadas.
 2. [~] Voz no computador: montada e medida (3,5 a 4,5 s até começar a falar); falta conversar pelo microfone.
-3. [ ] Ligação de teste pelo celular.
+3. [~] Teste pelo celular, de graça (navegador + LiveKit Cloud); falta o Lucca criar as contas.
 4. [ ] Crescer aos poucos (agenda já pronta).
