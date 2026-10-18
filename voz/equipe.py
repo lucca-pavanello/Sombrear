@@ -252,8 +252,8 @@ def criar_sessao(turno=None) -> AgentSession:
 server = AgentServer()
 
 
-# sem nome o LiveKit manda a Amanda para qualquer sala nova (Playground no celular, fase 3)
-@server.rtc_session(agent_name=os.environ.get("AGENTE_NOME", ""))
+# com nome ela aparece no Agent Console do LiveKit (é por lá que se testa no celular, fase 3)
+@server.rtc_session(agent_name=os.environ.get("AGENTE_NOME", "sombrear-equipe"))
 async def conversar(ctx: agents.JobContext) -> None:
     session = criar_sessao()
     await session.start(room=ctx.room, agent=AmandaEquipe())

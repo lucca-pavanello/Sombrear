@@ -36,7 +36,7 @@ leitura do banco da Sombrear. Fica fora do repo.
 ## Fase 3: testar pelo celular, de graça
 
 A Amanda roda no PC e o LiveKit Cloud (plano grátis: 1.000 min de agente por mês) leva o áudio
-até o navegador do celular. Sem número de telefone por enquanto: o número DDD 17 só entra no
+até o navegador do celular, pelo Agent Console do painel. Sem número de telefone por enquanto: o número DDD 17 só entra no
 piloto. Ligar de um app SIP direto no LiveKit não é garantido (ele não aceita cadastro de app),
 por isso o caminho é o navegador.
 
@@ -52,7 +52,7 @@ por isso o caminho é o navegador.
    ELEVEN_API_KEY=...
    CARTESIA_API_KEY=...
    ```
-4. No painel do LiveKit, Sandbox > criar o app **Web Voice Agent**. Ele dá um link para abrir no celular.
+4. O painel novo do LiveKit (out/2026) não tem mais Sandbox: o teste é pelo **Agent Console**.
 
 **Cada teste:**
 ```powershell
@@ -60,7 +60,9 @@ powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1                  # 
 powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz elevenlabs
 powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz cartesia
 ```
-Abrir o link do Sandbox no celular e falar. Ctrl+C no PC encerra tudo. Para escolher a voz da
+No celular: entrar em cloud.livekit.io, Agents > Console > Configure, em "Agent name" pôr
+`sombrear-equipe`, "Save and start session" e falar (o Console só lista agentes hospedados no
+LiveKit; a Amanda roda no PC, por isso o nome vai digitado). Ctrl+C no PC encerra tudo. Para escolher a voz da
 paga: `VOZ=elevenlabs uv run --group local python local/listar_vozes.py` e pôr o id em `VOZ_ID`
 no mesmo arquivo de chaves. O script lê os preços e o modelo do Kokoro de `~/.cache/sombrear-voz`
 (foto dos preços de 17/10/2026; atualizar quando a loja mudar preço).
