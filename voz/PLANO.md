@@ -33,6 +33,14 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
    (fim de fala 0,5 + ouvir 0,3 a 0,9 + Muse 2 a 3 até o 1º token + 1º trecho 0,6 a 1,9). Pergunta
    de orçamento faz duas idas ao modelo (ferramenta no meio): 5 a 7 s. Meta de conversa natural é
    menos de 1,5 s: o gargalo agora é o Muse.
+   Teste do Lucca pelo microfone (17/10): gostou, achou a voz ruim e viu dois sumiços. Corrigido
+   no mesmo dia (`sem_silencio.py`): aviso pronto "só um instante, vou calcular" ao chamar a
+   calculadora, "só um segundinho" se o Muse demora, limite de 5 s por tentativa, pedido para
+   repetir quando a fala chega vazia, fala curta no Canary (português fixo), valor falado em frase
+   pronta pelo código (a instalação vinha errada), e o 400 do Muse com tool_choice "none" (ficava
+   muda quando a calculadora falhava). Ligação simulada (`local/simular_ligacao.py`): primeira fala
+   4 a 5 s depois da pergunta, valor certo, sem silêncio comprido. Aberto: às vezes o Muse diz que
+   vai calcular e não chama a calculadora naquela vez (uma volta a mais).
 3. **Ligação de teste**: servidor, número de teste, ligar do celular; gravação e transcrição.
 4. **Crescer aos poucos**: a mesma Amanda ganhando uma coisa por vez (agenda de visitas, que já
    está pronta na 0031; aviso à equipe; o que mais for pedido).

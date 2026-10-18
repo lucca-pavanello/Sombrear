@@ -53,7 +53,7 @@ async def test_orcamento_bate_com_o_da_amanda_do_whatsapp() -> None:
         a = args[-1]
         assert a["modelo"] == "Rolo" and a["largura"] == 1.8 and a["altura"] == 1.2
         assert a["medida_do_vao"] is False
-        assert any('"total4x": 549.7' in s for s in _saidas(result))
+        assert any('"total4x_sem_instalacao": 549.7' in s for s in _saidas(result))
         await julgar(result, "Diz o valor de quinhentos e quarenta e nove reais e setenta centavos em "
                              "até 4x (pode dizer também o à vista) e deixa claro que é o tecido mais em conta ou um valor a partir de.")
 
@@ -73,7 +73,8 @@ async def test_tela_solar_sem_porcentagem_pergunta_antes() -> None:
     async with llm, session:
         result = await session.run(user_input="Faz um rolô tela solar de dois por um e meio, medida final, uma peça.")
         assert not _chamadas(result, "orcar_persiana"), "calculou tela solar sem saber se é 1% ou 3%"
-        await julgar(result, "Pergunta se a tela solar é 1% ou 3%.")
+        await julgar(result, "Pergunta se é 1% ou 3% (pode ser só \"um ou três por cento?\", sem repetir "
+                             "\"tela solar\") e não dá valor.")
 
 
 async def test_largura_maior_que_o_rolo_propoe_dividir() -> None:

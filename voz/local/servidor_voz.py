@@ -2,7 +2,7 @@
 LiveKit indica para o Kokoro). Fase 2 do PLANO.md.
 
     POST /v1/audio/speech          {"input": "...", "voice": "amanda"}  -> wav (Kokoro, voz J)
-    POST /v1/audio/transcriptions  multipart "file" (wav)               -> {"text": "..."} (Parakeet v3)
+    POST /v1/audio/transcriptions  multipart "file" (wav)               -> {"text": "..."} (Parakeet/Canary)
 
     uv run --group local python local/servidor_voz.py
 Variáveis: KOKORO_DIR (pasta com kokoro-v1.0.onnx e voices-v1.0.bin), PORTA_VOZ (padrão 8792).
@@ -10,6 +10,11 @@ Variáveis: KOKORO_DIR (pasta com kokoro-v1.0.onnx e voices-v1.0.bin), PORTA_VOZ
 Ouvir é o Parakeet TDT 0.6b v3 (NVIDIA, aberto, tem português), int8 na CPU: medido em 17/10/2026 no
 Ryzen 5 1600, 0,3 a 0,85 s por pergunta e acertou "1,80 por 1,20"; o Whisper small levou 5,5 a 7 s
 (sempre codifica 30 s de áudio) e o base errou as medidas.
+
+Fala curta (menos de CURTA s) vai para o Canary 1b v2 com português fixo: o Parakeet adivinha o
+idioma e, em palavra solta, escorrega para o inglês ("Não" virou "NOT"); o Canary leva ~0,4 s em
+fala curta, mas 2,5 s em frase longa, por isso só nela. As duas ganham MARGEM s de silêncio nas
+pontas: sem isso um "pode" curto chegou a voltar vazio no teste de 17/10.
 """
 
 from __future__ import annotations
@@ -39,6 +44,9 @@ kokoro = Kokoro(os.path.join(os.environ["KOKORO_DIR"], "kokoro-v1.0.onnx"),
                 os.path.join(os.environ["KOKORO_DIR"], "voices-v1.0.bin"))
 VOZES = {"amanda": sum(p * kokoro.get_voice_style(v) for v, p in MISTURA_J.items()).astype(np.float32)}
 parakeet = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", quantization="int8")
+canary = onnx_asr.load_model("nemo-canary-1b-v2", quantization="int8")
+CURTA = 1.5
+MARGEM = np.zeros(int(0.3 * 16000), np.float32)
 
 
 def ajustar_pronuncia(texto: str) -> str:
@@ -69,8 +77,14 @@ def para_16k(wav: bytes) -> np.ndarray:
 
 def ouvir(wav: bytes) -> str:
     t = time.perf_counter()
-    texto = parakeet.recognize(para_16k(wav), sample_rate=16000).strip()
-    log.info("ouvir %.2fs: %s", time.perf_counter() - t, texto[:80])
+    audio = para_16k(wav)
+    curta = len(audio) < CURTA * 16000
+    audio = np.concatenate([MARGEM, audio, MARGEM])
+    if curta:
+        texto = canary.recognize(audio, sample_rate=16000, language="pt").strip()
+    else:
+        texto = parakeet.recognize(audio, sample_rate=16000).strip()
+    log.info("ouvir %.2fs (%s): %s", time.perf_counter() - t, "canary" if curta else "parakeet", texto[:80])
     return texto
 
 
