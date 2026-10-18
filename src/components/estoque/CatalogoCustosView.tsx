@@ -16,6 +16,11 @@ import {
   ROTULO_CATEGORIA, grupoDa, rotuloUnidade,
   type CustoVigente, type CategoriaCatalogo, type GrupoCatalogo,
 } from '@/hooks/useCatalogoCustos'
+import { useFornecedoresCatalogo } from '@/hooks/useCatalogoManual'
+import {
+  pivotarPorFornecedor, ordenar, lojasDe, ROTULO_ORDEM, SEM_FORNECEDOR,
+  type MaterialPivotado, type Ordem,
+} from '@/lib/catalogo/pivo'
 import type { ToastType } from '@/hooks/useToast'
 
 /**
@@ -25,10 +30,11 @@ import type { ToastType } from '@/hooks/useToast'
  * um lado, acessório do outro, em dois botões grandes. Quem procura um tecido
  * não passa por ponteira nem deslizante no caminho.
  *
- * O custo mostrado é o mais recente DE CADA FORNECEDOR. Por isso o mesmo
- * produto pode aparecer duas vezes, uma por fornecedor — e deve mesmo: o
- * trilho duplo sai a R$ 8,74/m na Alumitec e a R$ 15,49/m na TA Decor, e
- * esconder um dos dois seria esconder a decisão de compra.
+ * O custo mostrado é o mais recente DE CADA LOJA, e as lojas ficam lado a
+ * lado: uma linha por material, uma coluna por fornecedor. O que vale no
+ * cálculo é o MENOR, porque é dele que a loja compra — e a comparação só é
+ * possível vendo os dois juntos. Célula vazia não é erro: é a loja que ainda
+ * não tem preço daquele material, e a dona preenche clicando nela.
  *
  * Esta tela NÃO altera o que a loja cobra. Custo e preço de venda vivem em
  * tabelas separadas que não se tocam.
@@ -55,140 +61,178 @@ interface Props {
   toast: (type: ToastType, message: string) => void
 }
 
-type Edicao = { modo: 'editar'; item: CustoVigente } | { modo: 'novo' }
+type Edicao =
+  | { modo: 'editar'; item: CustoVigente }
+  | { modo: 'novo' }
+  /** Preencher a célula vazia: este material, nesta loja, custo em branco. */
+  | { modo: 'preencher'; item: CustoVigente; fornecedorId: string }
 
 export default function CatalogoCustosView({ toast }: Props) {
   const { data: custos = [], isLoading, error } = useCustosVigentes()
   const { data: cotados = [] } = useApenasCotados()
+  const { data: fornecedoresCadastrados = [] } = useFornecedoresCatalogo()
 
   const [grupo, setGrupo] = useState<GrupoCatalogo>('tecido')
   const [busca, setBusca] = useState('')
   const [categoria, setCategoria] = useState('all')
   const [fornecedor, setFornecedor] = useState('all')
+  const [ordem, setOrdem] = useState<Ordem>('menor_custo')
   const [aberto, setAberto] = useState<CustoVigente | null>(null)
   const [edicao, setEdicao] = useState<Edicao | null>(null)
 
+  // O pivô vem ANTES de tudo para que as contagens da tela sejam de
+  // materiais, não de linhas por fornecedor: a loja compra 20 tecidos, não
+  // "20 ocorrências".
   const porGrupo = useMemo(
     () => ({
-      tecido: custos.filter(c => grupoDa(c.categoria) === 'tecido'),
-      acessorio: custos.filter(c => grupoDa(c.categoria) === 'acessorio'),
+      tecido: pivotarPorFornecedor(custos.filter(c => grupoDa(c.categoria) === 'tecido')),
+      acessorio: pivotarPorFornecedor(custos.filter(c => grupoDa(c.categoria) === 'acessorio')),
     }),
     [custos]
   )
 
   const doGrupo = porGrupo[grupo]
 
+  const nomePorId = useMemo(
+    () => new Map(fornecedoresCadastrados.map(f => [f.id, f.nome as string | null])),
+    [fornecedoresCadastrados]
+  )
+
+  /** As colunas: uma por loja que aparece neste grupo. */
+  const lojas = useMemo(() => lojasDe(doGrupo, nomePorId), [doGrupo, nomePorId])
+
   const categorias = useMemo(() => {
     const vistas = new Map<string, number>()
-    for (const c of doGrupo) vistas.set(c.categoria, (vistas.get(c.categoria) ?? 0) + 1)
+    for (const m of doGrupo) vistas.set(m.categoria, (vistas.get(m.categoria) ?? 0) + 1)
     return [...vistas.entries()].sort((a, b) => b[1] - a[1])
   }, [doGrupo])
 
-  const fornecedores = useMemo(
-    () => [...new Set(custos.map(c => c.fornecedor).filter(Boolean))].sort() as string[],
-    [custos]
-  )
-
   const linhas = useMemo(() => {
     const q = busca.trim().toLowerCase()
-    return doGrupo.filter(c => {
-      if (categoria !== 'all' && c.categoria !== categoria) return false
-      if (fornecedor !== 'all' && c.fornecedor !== fornecedor) return false
+    const filtradas = doGrupo.filter(m => {
+      if (categoria !== 'all' && m.categoria !== categoria) return false
+      if (fornecedor !== 'all' && !m.porFornecedor.has(fornecedor)) return false
       if (!q) return true
-      return (
-        c.descricao.toLowerCase().includes(q) ||
-        (c.codigo_fornecedor ?? '').toLowerCase().includes(q) ||
-        (c.cor ?? '').toLowerCase().includes(q)
+      if (m.descricao.toLowerCase().includes(q)) return true
+      if ((m.cor ?? '').toLowerCase().includes(q)) return true
+      // O código é de cada loja, então busca-se em todos: digitar "2849090"
+      // tem que achar o material mesmo que a Corttex não seja a mais barata.
+      return [...m.porFornecedor.values()].some(c =>
+        (c.codigo_fornecedor ?? '').toLowerCase().includes(q)
       )
     })
-  }, [doGrupo, busca, categoria, fornecedor])
+    return ordenar(filtradas, ordem)
+  }, [doGrupo, busca, categoria, fornecedor, ordem])
 
-  const aClassificar = custos.filter(c => c.categoria === 'outro').length
+  const aClassificar = [...porGrupo.tecido, ...porGrupo.acessorio]
+    .filter(m => m.categoria === 'outro').length
+  const totalMateriais = porGrupo.tecido.length + porGrupo.acessorio.length
 
-  const colunas: EstoqueTableColumn<CustoVigente>[] = [
+  const colunas: EstoqueTableColumn<MaterialPivotado>[] = [
     {
       key: 'produto',
       header: 'Produto',
       align: 'left',
-      cell: c => (
+      cell: m => (
         <div className="text-left">
-          <div className="font-medium text-foreground">{c.descricao}</div>
+          <div className="font-medium text-foreground">{m.descricao}</div>
           <div className="text-xs text-muted-foreground">
-            {c.codigo_fornecedor && <span className="font-mono">{c.codigo_fornecedor}</span>}
-            {c.codigo_fornecedor && ' · '}
-            {ROTULO_CATEGORIA[c.categoria]}
-            {c.cor && ` · ${c.cor}`}
-            {c.largura_m && ` · ${c.largura_m.toFixed(2).replace('.', ',')} m`}
+            {ROTULO_CATEGORIA[m.categoria]}
+            {m.cor && ` · ${m.cor}`}
+            {m.largura_m && ` · ${m.largura_m.toFixed(2).replace('.', ',')} m`}
+            {` · por ${rotuloUnidade(m.unidade_canonica)}`}
           </div>
         </div>
       ),
     },
-    {
-      key: 'fornecedor',
-      header: 'Fornecedor',
-      align: 'left',
-      cell: c => <span className="text-left text-muted-foreground">{c.fornecedor ?? '—'}</span>,
-    },
-    {
-      key: 'custo',
-      header: 'Custo',
+
+    // Uma coluna por loja. A mais barata fica marcada, porque é a que o
+    // cálculo usa — e a comparação é o motivo de a tela existir.
+    ...lojas.map<EstoqueTableColumn<MaterialPivotado>>(loja => ({
+      key: `loja:${loja.id}`,
+      header: loja.nome,
       align: 'right',
-      cell: c => {
-        // O fornecedor pode cobrar numa unidade e a loja consumir noutra: o
-        // deslizante vem por MILHEIRO. Empilhar "R$ 0,18 / un" embaixo de
-        // "R$ 259,44 − 30%" sem dizer a unidade do bruto faz o preço parecer
-        // conta errada. Quando converte, a linha de baixo carrega a unidade.
-        const converteu = c.unidade_documento !== rotuloUnidade(c.unidade_canonica).toUpperCase()
-          && Math.abs(c.preco_liquido - c.custo_unitario) > 0.0001
+      cell: m => {
+        const c = m.porFornecedor.get(loja.id)
+        if (!c) {
+          return (
+            <button
+              type="button"
+              onClick={() =>
+                setEdicao({
+                  modo: 'preencher',
+                  // O material é o mesmo; só o fornecedor e o custo mudam.
+                  item: m.menor ?? [...m.porFornecedor.values()][0],
+                  fornecedorId: loja.id,
+                })
+              }
+              className="w-full rounded-lg border border-dashed border-border/70 px-2 py-1.5 text-xs text-muted-foreground/70 transition-colors hover:border-brand/50 hover:text-brand"
+              title={`Informar quanto este material custa em ${loja.nome}`}
+            >
+              informar
+            </button>
+          )
+        }
+        const maisBarato = m.menor?.item_id === c.item_id && m.porFornecedor.size > 1
         return (
-          <div className="text-right">
-            <div className="font-semibold tabular-nums text-foreground">
-              {precoPor(c.custo_unitario, c.unidade_canonica)}
-            </div>
-            {converteu ? (
-              <div className="text-xs text-muted-foreground tabular-nums">
-                {formatCurrency(c.preco_liquido)} por {c.unidade_documento}
-              </div>
-            ) : c.desconto_pct > 0 ? (
-              <div className="text-xs text-muted-foreground tabular-nums">
-                tabela {formatCurrency(c.preco_bruto)} − {c.desconto_pct}%
-              </div>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            onClick={() => setEdicao({ modo: 'editar', item: c })}
+            className="w-full rounded-lg px-2 py-1 text-right transition-colors hover:bg-muted/60"
+            title={`Corrigir o custo em ${loja.nome}`}
+          >
+            <span
+              className={cn(
+                'block font-semibold tabular-nums',
+                maisBarato ? 'text-brand' : 'text-foreground'
+              )}
+            >
+              {formatCurrency(c.custo_unitario)}
+            </span>
+            {/* Só cabe uma linha de contexto por célula agora que são várias
+                lojas. A ordem é a da utilidade: qual vale, depois o desconto
+                que explica o número (todo item da Alumitec tem 30%), depois
+                a data. O detalhe completo continua no Histórico. */}
+            <span className="block text-xs text-muted-foreground tabular-nums">
+              {maisBarato
+                ? 'mais barato'
+                : c.desconto_pct > 0
+                  ? `tabela ${formatCurrency(c.preco_bruto)} − ${c.desconto_pct}%`
+                  : dataBr(c.data_documento)}
+            </span>
+          </button>
         )
       },
-    },
+    })),
+
     {
       key: 'origem',
       header: 'De onde veio',
       align: 'left',
-      cell: c => (
-        <div className="text-left text-xs">
-          <div className="text-foreground">{c.referencia}</div>
-          <div className="text-muted-foreground">
-            {dataBr(c.data_documento)}
-            {c.tipo === 'lista_manual' && ' · informado pela loja'}
+      cell: m =>
+        m.menor ? (
+          <div className="text-left text-xs">
+            <div className="text-foreground">{m.menor.referencia}</div>
+            <div className="text-muted-foreground">
+              {dataBr(m.menor.data_documento)}
+              {m.menor.tipo === 'lista_manual' && ' · informado pela loja'}
+            </div>
           </div>
-        </div>
-      ),
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
     },
     {
       key: 'historico',
       header: '',
       align: 'center',
-      cell: c => (
+      cell: m => (
         <div className="flex items-center justify-end gap-1">
           <button
             type="button"
-            onClick={() => setEdicao({ modo: 'editar', item: c })}
-            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-brand"
-          >
-            Corrigir
-          </button>
-          <button
-            type="button"
-            onClick={() => setAberto(c)}
-            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-brand"
+            onClick={() => m.menor && setAberto(m.menor)}
+            disabled={!m.menor}
+            className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-brand disabled:opacity-40"
           >
             Histórico <ChevronRight className="h-3.5 w-3.5" />
           </button>
@@ -214,9 +258,9 @@ export default function CatalogoCustosView({ toast }: Props) {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           title="Materiais com custo"
-          value={custos.length}
+          value={totalMateriais}
           icon={<Package className="h-5 w-5" />}
-          subtitle="o mais recente de cada fornecedor"
+          subtitle="vale o mais barato entre as lojas"
         />
         <KpiCard
           title="Tecidos"
@@ -229,9 +273,10 @@ export default function CatalogoCustosView({ toast }: Props) {
           icon={<Wrench className="h-5 w-5" />}
         />
         <KpiCard
-          title="Fornecedores"
-          value={fornecedores.length}
+          title="Lojas"
+          value={lojas.filter(l => l.id !== SEM_FORNECEDOR).length}
           icon={<Truck className="h-5 w-5" />}
+          subtitle={`com preço de ${GRUPO_INFO[grupo].rotulo.toLowerCase()}`}
         />
       </div>
 
@@ -311,9 +356,17 @@ export default function CatalogoCustosView({ toast }: Props) {
             value={fornecedor}
             onChange={setFornecedor}
             options={[
-              { value: 'all', label: 'Todos os fornecedores' },
-              ...fornecedores.map(f => ({ value: f, label: f })),
+              { value: 'all', label: 'Todas as lojas' },
+              ...lojas.map(l => ({ value: l.id, label: `Tem preço em ${l.nome}` })),
             ]}
+          />
+          <CustomSelect
+            value={ordem}
+            onChange={v => setOrdem(v as Ordem)}
+            options={(Object.keys(ROTULO_ORDEM) as Ordem[]).map(o => ({
+              value: o,
+              label: ROTULO_ORDEM[o],
+            }))}
           />
           <button type="button" onClick={() => setEdicao({ modo: 'novo' })} className={tbl.addBtn}>
             <Plus className="h-4 w-4" /> Novo material
@@ -323,7 +376,7 @@ export default function CatalogoCustosView({ toast }: Props) {
         <EstoqueTable
           columns={colunas}
           data={linhas}
-          keyExtractor={c => c.item_id}
+          keyExtractor={m => m.chave}
           isLoading={isLoading}
           emptyMessage={
             busca || categoria !== 'all' || fornecedor !== 'all'
@@ -376,7 +429,11 @@ export default function CatalogoCustosView({ toast }: Props) {
 
       {edicao && (
         <CorrigirCustoModal
-          item={edicao.modo === 'editar' ? edicao.item : null}
+          item={edicao.modo === 'novo' ? null : edicao.item}
+          /* Preencher a célula vazia é o mesmo material em outra loja: os
+             dados do produto vêm prontos, o fornecedor já vem escolhido e só
+             o custo fica em branco, que é o que a dona tem para digitar. */
+          trocarPara={edicao.modo === 'preencher' ? edicao.fornecedorId : undefined}
           onFechar={() => setEdicao(null)}
           toast={toast}
         />
