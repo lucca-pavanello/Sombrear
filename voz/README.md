@@ -100,5 +100,5 @@ leva 2 a 3 s até a primeira palavra e hoje é o gargalo.
 
 1. [x] Cérebro da Amanda por texto: orçamento pelo motor do Dash, conhecimento do WhatsApp, 6 conversas testadas.
 2. [~] Voz no computador: montada e medida (3,5 a 4,5 s até começar a falar); falta conversar pelo microfone.
-3. [~] Teste pelo celular, de graça (navegador + LiveKit Cloud); falta o Lucca criar as contas.
+3. [x] Teste pelo celular, de graça (navegador + LiveKit Cloud + voz Jessica): aprovado pelo Lucca em 17/10.
 4. [ ] Crescer aos poucos (agenda já pronta).

@@ -41,7 +41,11 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
    muda quando a calculadora falhava). Ligação simulada (`local/simular_ligacao.py`): primeira fala
    4 a 5 s depois da pergunta, valor certo, sem silêncio comprido. Aberto: às vezes o Muse diz que
    vai calcular e não chama a calculadora naquela vez (uma volta a mais).
-3. **Ligação de teste**: servidor, número de teste, ligar do celular; gravação e transcrição.
+3. **Ligação de teste** (feito em 17/10, de graça): a Amanda no PC, o LiveKit Cloud grátis levando o
+   áudio ao navegador do celular (Agent Console) e a voz Jessica da ElevenLabs (plano grátis). O
+   Lucca testou pelo celular e aprovou. Para ir ao ar falta: número DDD 17 (Twilio US$ 4,25/mês ou
+   SIP brasileiro), servidor fora do PC, voz brasileira nativa (US$ 5 de crédito na ElevenLabs
+   libera) e gravação/transcrição das ligações.
 4. **Crescer aos poucos**: a mesma Amanda ganhando uma coisa por vez (agenda de visitas, que já
    está pronta na 0031; aviso à equipe; o que mais for pedido).
 5. **Piloto com cliente** e 6. **frentes abaixo**: mais para frente.
