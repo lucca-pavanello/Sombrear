@@ -33,23 +33,34 @@ const rotulo = 'mb-1.5 block text-xs font-medium text-muted-foreground'
 interface Props {
   /** Null = cadastrar material novo; preenchido = corrigir o custo deste. */
   item: CustoVigente | null
+  /**
+   * Informar o custo do MESMO material em outra loja — a célula vazia do
+   * catálogo. O produto vem pronto de `item`, o fornecedor já vem escolhido
+   * e o custo fica em branco: copiar o preço da outra loja seria pior que
+   * não ter preço nenhum, porque pareceria um dado conferido.
+   *
+   * O código também começa vazio: código é de cada fornecedor, e repetir o
+   * da Corttex num item da TA Decor inventa um identificador que não existe.
+   */
+  trocarPara?: string
   onFechar: () => void
   toast: (type: ToastType, message: string) => void
 }
 
-export default function CorrigirCustoModal({ item, onFechar, toast }: Props) {
+export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }: Props) {
   const { data: fornecedores = [] } = useFornecedoresCatalogo()
   const salvar = useSalvarCustoManual()
 
-  const editando = !!item
-  const [fornecedorId, setFornecedorId] = useState(item?.fornecedor_id ?? '')
+  const preenchendo = !!item && !!trocarPara
+  const editando = !!item && !preenchendo
+  const [fornecedorId, setFornecedorId] = useState(trocarPara ?? item?.fornecedor_id ?? '')
   const [descricao, setDescricao] = useState(item?.descricao ?? '')
-  const [codigo, setCodigo] = useState(item?.codigo_fornecedor ?? '')
+  const [codigo, setCodigo] = useState(preenchendo ? '' : item?.codigo_fornecedor ?? '')
   const [categoria, setCategoria] = useState<string>(item?.categoria ?? 'tecido')
   const [cor, setCor] = useState(item?.cor ?? '')
   const [largura, setLargura] = useState(item?.largura_m?.toString() ?? '')
   const [unidade, setUnidade] = useState<string>(item?.unidade_canonica ?? 'm')
-  const [custo, setCusto] = useState(item?.custo_unitario?.toString() ?? '')
+  const [custo, setCusto] = useState(preenchendo ? '' : item?.custo_unitario?.toString() ?? '')
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [confirmando, setConfirmando] = useState<string | null>(null)
@@ -81,7 +92,10 @@ export default function CorrigirCustoModal({ item, onFechar, toast }: Props) {
     // Avisa, mas não impede: a maioria dos erros de digitação de preço é
     // casa decimal, e quem corrige sabe quando o reajuste foi grande mesmo.
     if (!ignorarAviso) {
-      const suspeita = mudancaSuspeita(item?.custo_unitario ?? null, custoNum)
+      // Ao informar o preço da OUTRA loja não há custo anterior com que
+      // comparar: avisar "subiu 120%" contra o preço de um fornecedor
+      // diferente seria alarme falso — a diferença entre lojas é o ponto.
+      const suspeita = mudancaSuspeita(preenchendo ? null : item?.custo_unitario ?? null, custoNum)
       if (suspeita) {
         setConfirmando(suspeita)
         return
@@ -114,12 +128,14 @@ export default function CorrigirCustoModal({ item, onFechar, toast }: Props) {
       >
         <div className="border-b border-border px-5 py-4">
           <h3 className="font-semibold text-foreground">
-            {editando ? 'Corrigir custo' : 'Novo material'}
+            {editando ? 'Corrigir custo' : preenchendo ? 'Custo na outra loja' : 'Novo material'}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {editando
               ? 'O documento do fornecedor fica como está. Sua correção entra como um registro de hoje e passa a valer.'
-              : 'Material que a loja compra e ainda não aparece em nenhum documento.'}
+              : preenchendo
+                ? 'Mesmo material, preço da outra loja. As duas ficam lado a lado no catálogo, e o cálculo passa a usar a mais barata.'
+                : 'Material que a loja compra e ainda não aparece em nenhum documento.'}
           </p>
         </div>
 
@@ -141,12 +157,15 @@ export default function CorrigirCustoModal({ item, onFechar, toast }: Props) {
 
           <div>
             <label className={rotulo}>Material</label>
+            {/* Travado também ao informar o preço da outra loja: é o nome que
+                junta as duas numa linha só. Mudar uma letra aqui faria o
+                material se partir em dois no catálogo. */}
             <input
               value={descricao}
               onChange={e => setDescricao(e.target.value)}
               placeholder="Como o fornecedor chama"
               className={campo}
-              readOnly={editando}
+              readOnly={editando || preenchendo}
             />
           </div>
 
@@ -273,7 +292,7 @@ export default function CorrigirCustoModal({ item, onFechar, toast }: Props) {
             className="inline-flex items-center gap-2 rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-brand transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
           >
             {salvar.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            {editando ? 'Salvar correção' : 'Cadastrar'}
+            {editando ? 'Salvar correção' : preenchendo ? 'Salvar custo' : 'Cadastrar'}
           </button>
         </div>
       </div>

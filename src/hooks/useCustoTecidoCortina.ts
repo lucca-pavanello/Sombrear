@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { usePrecosCortinaTecidos } from '@/hooks/usePrecos'
 import { useCustosVigentes } from '@/hooks/useCatalogoCustos'
+import { pivotarPorFornecedor, chaveMaterial } from '@/lib/catalogo/pivo'
 
 /**
  * A ponte entre o que a loja COBRA pelo tecido e o que ela PAGA por ele.
@@ -13,11 +14,11 @@ import { useCustosVigentes } from '@/hooks/useCatalogoCustos'
  * catálogo e deu NENHUM nos 12 — por isso a ligação é dita pela loja e
  * guardada em `precos_cortina_tecidos.catalogo_*`.
  *
- * A junção é por fornecedor + descrição (+ código, quando existe), que é a
- * chave da view `catalogo_custo_vigente`. NÃO é por id de linha: cada
- * correção de custo cria uma linha nova, e um id guardado apontaria para o
- * custo velho no instante seguinte. Juntando pela chave, a correção de hoje
- * chega sozinha aqui.
+ * A junção é pela DESCRIÇÃO do material, e o custo usado é o menor entre as
+ * lojas que o vendem. NÃO é por id de linha: cada correção de custo cria uma
+ * linha nova, e um id guardado apontaria para o custo velho no instante
+ * seguinte. Juntando pela descrição, tanto a correção de hoje quanto um
+ * preço novo de outra loja chegam aqui sozinhos.
  */
 
 export interface CustoDeCompra {
@@ -27,6 +28,8 @@ export interface CustoDeCompra {
   /** De onde veio o número: pedido do fornecedor ou correção da loja. */
   referencia: string
   dataDocumento: string | null
+  /** Em quantas lojas este material tem preço. */
+  lojas: number
 }
 
 export function useCustoTecidoCortina() {
@@ -38,26 +41,31 @@ export function useCustoTecidoCortina() {
     const mapa = new Map<string, CustoDeCompra>()
     if (!tecidos?.length || !custos?.length) return mapa
 
+    // A ligação diz QUAL material é; o pivô diz em qual loja ele sai mais
+    // barato. É por isso que a busca aqui é pela descrição e não pelo
+    // fornecedor guardado na ligação: quando a dona cadastrar o mesmo tecido
+    // numa segunda loja por menos, a margem desta tela passa a usar o menor
+    // sozinha, sem ninguém religar nada.
+    const porMaterial = new Map(
+      pivotarPorFornecedor(custos).map(m => [m.chave, m] as const)
+    )
+
     for (const t of tecidos) {
       // Fornecedor pode ser nulo: a lista de preços que a dona passou não diz
       // de quem são os materiais, e eles valem como custo do mesmo jeito.
       // O que não pode faltar é a descrição — sem ela não há o que procurar.
       if (!t.catalogo_descricao) continue
-      const achado = custos.find(
-        c =>
-          (c.fornecedor_id ?? null) === (t.catalogo_fornecedor_id ?? null) &&
-          c.descricao === t.catalogo_descricao &&
-          (!t.catalogo_codigo || c.codigo_fornecedor === t.catalogo_codigo)
-      )
+      const material = porMaterial.get(chaveMaterial(t.catalogo_descricao))
       // Ligação apontando para material que saiu do catálogo não vira custo
       // zero: fica de fora, e a tela mostra "sem custo ligado".
-      if (!achado) continue
+      if (!material?.menor) continue
       mapa.set(t.nome, {
-        custoPorMetro: achado.custo_unitario,
-        fornecedor: achado.fornecedor,
-        descricao: achado.descricao,
-        referencia: achado.referencia,
-        dataDocumento: achado.data_documento,
+        custoPorMetro: material.menor.custo_unitario,
+        fornecedor: material.menor.fornecedor,
+        descricao: material.menor.descricao,
+        referencia: material.menor.referencia,
+        dataDocumento: material.menor.data_documento,
+        lojas: material.porFornecedor.size,
       })
     }
     return mapa

@@ -19,6 +19,8 @@ import {
   usePrecosCortinaTecidos, usePrecosCortinaValores,
   MODELOS_PERSIANA,
 } from '@/hooks/usePrecos'
+import { useCustoTecidoCortina } from '@/hooks/useCustoTecidoCortina'
+import { margemDoTecido } from '@/lib/catalogo/margem'
 
 interface Props { toast: (type: 'success' | 'error', message: string) => void }
 
@@ -572,10 +574,42 @@ function PainelAjustes({ titulo, children }: { titulo: string; children: React.R
  * orçamento do cliente; o custo fica ao lado só de referência (venda = custo
  * × margem — hoje 2x, decisão da loja de 14/08). Por isso a seção fica
  * separada das persianas: misturar as duas lógicas na mesma tela confunde.
+ *
+ * A coluna "Custo" aqui era um número derivado: exatamente `venda ÷ 2` nas 12
+ * linhas, porque foi assim que ela nasceu. Conferida contra o catálogo de
+ * compras, divergia em 9 das 12 — a Gaze cru 2867 dizia 13,90 e a loja paga
+ * 14,90; a Flame 3,30 dizia 13,50 e a loja paga 14,50. Quem olhasse a margem
+ * por essa coluna veria 50% em tudo, sempre, porque era 50% por construção.
+ *
+ * Agora ela vem do catálogo, é só leitura e mostra o MENOR custo entre as
+ * lojas, que é o que a loja de fato paga. Em branco = tecido ainda não ligado
+ * a um material (Estoque → Custos → "Ligar tecidos").
  */
 function SecaoCortinas({ salvar, excluir, adicionar }: SecaoProps) {
   const { data: tecidos, isLoading: l1 } = usePrecosCortinaTecidos()
   const { data: valores, isLoading: l2 } = usePrecosCortinaValores()
+  const { porNome } = useCustoTecidoCortina()
+
+  // O custo real entra como campo só-leitura da linha. O PrecosGrid pula
+  // colunas `readonly` ao montar o patch, então nada disto é enviado ao
+  // banco — `precos_cortina_tecidos` continua com as colunas que sempre teve.
+  const linhasTecidos = useMemo(
+    () =>
+      (tecidos ?? []).map(t => {
+        const compra = porNome.get(t.nome)
+        const m = compra ? margemDoTecido(1, Number(t.preco), compra.custoPorMetro) : null
+        return {
+          ...t,
+          custo_real: compra?.custoPorMetro ?? null,
+          custo_loja: compra?.fornecedor ?? (compra ? 'Sem fornecedor' : null),
+          margem_real: m ? m.margem : null,
+        }
+      }),
+    [tecidos, porNome]
+  )
+
+  const semLigacao = linhasTecidos.filter(t => t.custo_real == null).length
+
   if (l1 || l2) return <Carregando />
 
   const pendentes = (valores ?? []).filter(v => v.valor == null)
@@ -604,17 +638,34 @@ function SecaoCortinas({ salvar, excluir, adicionar }: SecaoProps) {
           O <b>fator franzido</b> só vale para forro que vai franzido atrás: BK 100% = 1,5,
           os demais = 1,8 (vazio usa 1,8).
         </p>
+        <p className="mb-2 text-xs text-muted-foreground">
+          <b>Compra</b> e <b>Margem</b> vêm do catálogo de custos e não se editam aqui — é
+          o menor preço entre as lojas, e a coluna diz de qual. Para corrigir, use{' '}
+          <b>Estoque → Custos</b>.
+          {semLigacao > 0 && (
+            <>
+              {' '}
+              {semLigacao} tecido{semLigacao > 1 ? 's' : ''} ainda sem material ligado
+              aparece{semLigacao > 1 ? 'm' : ''} com a compra em branco.
+            </>
+          )}
+        </p>
         <PrecosGrid
           colunas={[
             { key: 'nome', label: 'Nome', tipo: 'texto' },
             { key: 'tipo', label: 'Uso', tipo: 'select', options: [
               { value: 'tecido', label: 'Tecido' }, { value: 'forro', label: 'Forro / blackout' }] },
-            { key: 'custo', label: 'Custo R$/m', tipo: 'numero', formato: fmtBRL },
+            { key: 'custo_real', label: 'Compra R$/m', tipo: 'numero', readonly: true,
+              formato: v => (v == null ? '—' : fmtBRL(v)) },
+            { key: 'custo_loja', label: 'Onde compra', tipo: 'texto', readonly: true,
+              formato: v => (v == null ? '—' : String(v)) },
             { key: 'preco', label: 'Venda R$/m', tipo: 'numero', formato: fmtBRL },
+            { key: 'margem_real', label: 'Margem', tipo: 'numero', readonly: true,
+              formato: v => (v == null ? '—' : `${(Number(v) * 100).toFixed(1).replace('.', ',')}%`) },
             { key: 'largura_rolo', label: 'Largura do rolo', tipo: 'numero', formato: fmtNum },
             { key: 'fator_franzido', label: 'Fator franzido', tipo: 'numero', formato: fmtNum },
           ]}
-          linhas={tecidos ?? []}
+          linhas={linhasTecidos}
           chave={r => ({ id: r.id })}
           onSalvar={salvar('precos_cortina_tecidos')}
           onExcluir={excluir!('precos_cortina_tecidos')}
