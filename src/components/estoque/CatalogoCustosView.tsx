@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   Search, Scissors, Wrench, ChevronRight, FileText, Package,
-  Truck, CircleHelp, Receipt, Plus,
+  Truck, CircleHelp, Receipt, Plus, Check, Store, TriangleAlert,
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { CustomSelect } from '@/components/ui/CustomSelect'
@@ -18,7 +18,11 @@ import {
 } from '@/hooks/useCatalogoCustos'
 import { useFornecedoresCatalogo } from '@/hooks/useCatalogoManual'
 import {
-  pivotarPorFornecedor, ordenar, lojasDe, ROTULO_ORDEM, SEM_FORNECEDOR,
+  useColunasFornecedor, useCompraEscolhida, useMarcarCompra,
+} from '@/hooks/useCatalogoLojas'
+import AdicionarLojaColuna from './AdicionarLojaColuna'
+import {
+  pivotarPorFornecedor, ordenar, lojasDe, pagandoAMais, ROTULO_ORDEM, SEM_FORNECEDOR,
   type MaterialPivotado, type Ordem,
 } from '@/lib/catalogo/pivo'
 import type { ToastType } from '@/hooks/useToast'
@@ -35,6 +39,11 @@ import type { ToastType } from '@/hooks/useToast'
  * cálculo é o MENOR, porque é dele que a loja compra — e a comparação só é
  * possível vendo os dois juntos. Célula vazia não é erro: é a loja que ainda
  * não tem preço daquele material, e a dona preenche clicando nela.
+ *
+ * O check de cada célula é outra coisa: registra ONDE a loja comprou, que
+ * nem sempre é o mais barato (prazo, frete, estoque). Ele não muda conta
+ * nenhuma — quando discorda do menor, a tela mostra a diferença e deixa a
+ * decisão com a loja.
  *
  * Esta tela NÃO altera o que a loja cobra. Custo e preço de venda vivem em
  * tabelas separadas que não se tocam.
@@ -57,7 +66,6 @@ function precoPor(custo: number, unidade: string) {
 }
 
 interface Props {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   toast: (type: ToastType, message: string) => void
 }
 
@@ -79,6 +87,11 @@ export default function CatalogoCustosView({ toast }: Props) {
   const [ordem, setOrdem] = useState<Ordem>('menor_custo')
   const [aberto, setAberto] = useState<CustoVigente | null>(null)
   const [edicao, setEdicao] = useState<Edicao | null>(null)
+  const [novaLoja, setNovaLoja] = useState(false)
+
+  const { data: fixadas = [] } = useColunasFornecedor(grupo)
+  const { data: compraEscolhida } = useCompraEscolhida()
+  const marcarCompra = useMarcarCompra()
 
   // O pivô vem ANTES de tudo para que as contagens da tela sejam de
   // materiais, não de linhas por fornecedor: a loja compra 20 tecidos, não
@@ -98,8 +111,11 @@ export default function CatalogoCustosView({ toast }: Props) {
     [fornecedoresCadastrados]
   )
 
-  /** As colunas: uma por loja que aparece neste grupo. */
-  const lojas = useMemo(() => lojasDe(doGrupo, nomePorId), [doGrupo, nomePorId])
+  /** As colunas: as lojas com preço neste grupo, mais as que a loja fixou. */
+  const lojas = useMemo(
+    () => lojasDe(doGrupo, nomePorId, fixadas),
+    [doGrupo, nomePorId, fixadas]
+  )
 
   const categorias = useMemo(() => {
     const vistas = new Map<string, number>()
@@ -174,33 +190,67 @@ export default function CatalogoCustosView({ toast }: Props) {
           )
         }
         const maisBarato = m.menor?.item_id === c.item_id && m.porFornecedor.size > 1
+        const compradaAqui = compraEscolhida?.get(m.chave) === loja.id
         return (
-          <button
-            type="button"
-            onClick={() => setEdicao({ modo: 'editar', item: c })}
-            className="w-full rounded-lg px-2 py-1 text-right transition-colors hover:bg-muted/60"
-            title={`Corrigir o custo em ${loja.nome}`}
-          >
-            <span
+          <div className="flex items-center justify-end gap-1.5">
+            {/* O check é "foi aqui que eu comprei" — registro, não regra: o
+                cálculo segue usando o menor. Clicar de novo desmarca, porque
+                "não sei de onde veio" é um estado honesto e comum. */}
+            <button
+              type="button"
+              onClick={() =>
+                marcarCompra.mutate(
+                  { materialChave: m.chave, fornecedorId: compradaAqui ? null : loja.id },
+                  {
+                    onError: e =>
+                      toast('error', e instanceof Error ? e.message : 'Não deu para marcar.'),
+                  }
+                )
+              }
+              aria-pressed={compradaAqui}
+              aria-label={`Comprei ${m.descricao} em ${loja.nome}`}
+              title={
+                compradaAqui
+                  ? `Comprei em ${loja.nome} — clique para desmarcar`
+                  : `Marcar que comprei em ${loja.nome}`
+              }
               className={cn(
-                'block font-semibold tabular-nums',
-                maisBarato ? 'text-brand' : 'text-foreground'
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors',
+                compradaAqui
+                  ? 'border-brand bg-brand text-white'
+                  : 'border-border text-transparent hover:border-brand/50 hover:text-brand/40'
               )}
             >
-              {formatCurrency(c.custo_unitario)}
-            </span>
-            {/* Só cabe uma linha de contexto por célula agora que são várias
-                lojas. A ordem é a da utilidade: qual vale, depois o desconto
-                que explica o número (todo item da Alumitec tem 30%), depois
-                a data. O detalhe completo continua no Histórico. */}
-            <span className="block text-xs text-muted-foreground tabular-nums">
-              {maisBarato
-                ? 'mais barato'
-                : c.desconto_pct > 0
-                  ? `tabela ${formatCurrency(c.preco_bruto)} − ${c.desconto_pct}%`
-                  : dataBr(c.data_documento)}
-            </span>
-          </button>
+              <Check className="h-3 w-3" strokeWidth={3} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setEdicao({ modo: 'editar', item: c })}
+              className="min-w-0 flex-1 rounded-lg px-2 py-1 text-right transition-colors hover:bg-muted/60"
+              title={`Corrigir o custo em ${loja.nome}`}
+            >
+              <span
+                className={cn(
+                  'block font-semibold tabular-nums',
+                  maisBarato ? 'text-brand' : 'text-foreground'
+                )}
+              >
+                {formatCurrency(c.custo_unitario)}
+              </span>
+              {/* Só cabe uma linha de contexto por célula agora que são
+                  várias lojas. A ordem é a da utilidade: qual vale, depois o
+                  desconto que explica o número (todo item da Alumitec tem
+                  30%), depois a data. O detalhe fica no Histórico. */}
+              <span className="block text-xs text-muted-foreground tabular-nums">
+                {maisBarato
+                  ? 'mais barato'
+                  : c.desconto_pct > 0
+                    ? `tabela ${formatCurrency(c.preco_bruto)} − ${c.desconto_pct}%`
+                    : dataBr(c.data_documento)}
+              </span>
+            </button>
+          </div>
         )
       },
     })),
@@ -209,18 +259,31 @@ export default function CatalogoCustosView({ toast }: Props) {
       key: 'origem',
       header: 'De onde veio',
       align: 'left',
-      cell: m =>
-        m.menor ? (
+      cell: m => {
+        if (!m.menor) return <span className="text-xs text-muted-foreground">—</span>
+        // Comprar do mais caro às vezes é decisão (prazo, frete, estoque) e
+        // às vezes é distração. A tela não escolhe por ninguém: mostra a
+        // diferença e deixa a loja decidir de novo.
+        const aviso = pagandoAMais(m, compraEscolhida?.get(m.chave))
+        return (
           <div className="text-left text-xs">
             <div className="text-foreground">{m.menor.referencia}</div>
             <div className="text-muted-foreground">
               {dataBr(m.menor.data_documento)}
               {m.menor.tipo === 'lista_manual' && ' · informado pela loja'}
             </div>
+            {aviso && (
+              <div className="mt-1 flex items-start gap-1 text-amber-700 dark:text-amber-400">
+                <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
+                <span>
+                  {formatCurrency(aviso.diferenca)} mais caro que{' '}
+                  {aviso.menor.fornecedor ?? 'a outra'}
+                </span>
+              </div>
+            )}
           </div>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        ),
+        )
+      },
     },
     {
       key: 'historico',
@@ -368,6 +431,13 @@ export default function CatalogoCustosView({ toast }: Props) {
               label: ROTULO_ORDEM[o],
             }))}
           />
+          <button
+            type="button"
+            onClick={() => setNovaLoja(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-brand/50 hover:text-brand"
+          >
+            <Store className="h-4 w-4" /> Nova loja
+          </button>
           <button type="button" onClick={() => setEdicao({ modo: 'novo' })} className={tbl.addBtn}>
             <Plus className="h-4 w-4" /> Novo material
           </button>
@@ -424,6 +494,16 @@ export default function CatalogoCustosView({ toast }: Props) {
       )}
 
       <LigarTecidosVenda toast={toast} />
+
+      {novaLoja && (
+        <AdicionarLojaColuna
+          grupo={grupo}
+          jaSaoColuna={lojas.map(l => l.id).filter(id => id !== SEM_FORNECEDOR)}
+          rotuloGrupo={GRUPO_INFO[grupo].rotulo}
+          onFechar={() => setNovaLoja(false)}
+          toast={toast}
+        />
+      )}
 
       {aberto && <PainelHistorico item={aberto} onFechar={() => setAberto(null)} />}
 
