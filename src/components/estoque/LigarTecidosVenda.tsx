@@ -36,7 +36,7 @@ export default function LigarTecidosVenda({ toast }: { toast: (t: ToastType, m: 
     const doCatalogo = custos
       .filter(c => c.categoria === 'tecido')
       .map(c => ({
-        value: `${c.fornecedor_id}|${c.descricao}|${c.codigo_fornecedor ?? ''}`,
+        value: `${c.fornecedor_id ?? ''}|${c.descricao}|${c.codigo_fornecedor ?? ''}`,
         label: `${c.descricao} — ${c.fornecedor} — ${formatCusto(c.custo_unitario)}/m`,
       }))
     return [{ value: SEM_LIGACAO, label: 'Sem ligação' }, ...doCatalogo]
@@ -55,7 +55,8 @@ export default function LigarTecidosVenda({ toast }: { toast: (t: ToastType, m: 
       } else {
         const [fornecedorId, descricao, codigo] = valor.split('|')
         await ligar.mutateAsync({
-          tecidoId, fornecedorId, descricao, codigo: codigo || null,
+          // Material da lista da loja nao tem fornecedor; a descricao basta.
+          tecidoId, fornecedorId: fornecedorId || null, descricao, codigo: codigo || null,
         })
         toast('success', `${nome} agora puxa o custo de ${descricao}.`)
       }
@@ -89,8 +90,8 @@ export default function LigarTecidosVenda({ toast }: { toast: (t: ToastType, m: 
             const m = custo
               ? margemDoTecido(1, Number(t.preco), custo.custoPorMetro)
               : null
-            const valor = t.catalogo_fornecedor_id && t.catalogo_descricao
-              ? `${t.catalogo_fornecedor_id}|${t.catalogo_descricao}|${t.catalogo_codigo ?? ''}`
+            const valor = t.catalogo_descricao
+              ? `${t.catalogo_fornecedor_id ?? ''}|${t.catalogo_descricao}|${t.catalogo_codigo ?? ''}`
               : SEM_LIGACAO
 
             return (

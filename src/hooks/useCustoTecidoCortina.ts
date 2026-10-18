@@ -39,10 +39,13 @@ export function useCustoTecidoCortina() {
     if (!tecidos?.length || !custos?.length) return mapa
 
     for (const t of tecidos) {
-      if (!t.catalogo_fornecedor_id || !t.catalogo_descricao) continue
+      // Fornecedor pode ser nulo: a lista de preços que a dona passou não diz
+      // de quem são os materiais, e eles valem como custo do mesmo jeito.
+      // O que não pode faltar é a descrição — sem ela não há o que procurar.
+      if (!t.catalogo_descricao) continue
       const achado = custos.find(
         c =>
-          c.fornecedor_id === t.catalogo_fornecedor_id &&
+          (c.fornecedor_id ?? null) === (t.catalogo_fornecedor_id ?? null) &&
           c.descricao === t.catalogo_descricao &&
           (!t.catalogo_codigo || c.codigo_fornecedor === t.catalogo_codigo)
       )
