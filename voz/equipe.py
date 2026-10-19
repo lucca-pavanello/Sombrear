@@ -37,6 +37,7 @@ except ImportError:  # pragma: no cover
 
 from agenda import FUSO
 from frases import TrechosCurtos
+from ligacao import Ligacao, enviar, so_digitos
 from sem_silencio import (FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia,
                           ESPERA, ESPERA_DEPOIS_DA_CONTA, com_espera, fala_calcular, sem_anuncio)
 from modelo import criar_llm
@@ -128,7 +129,15 @@ def abertura(agora: datetime) -> str:
     return f"{saudacao(agora)}, Amanda da Sombrear Decor aqui. Como posso te ajudar?"
 
 
-def instrucoes_cliente(agora: datetime) -> str:
+LINHA_CONHECIDA = """
+# O número de quem ligou
+A ligação veio de um número que aparece para você. No passo do telefone, em vez de pedir o número,
+pergunte "Posso te chamar no WhatsApp nesse número que você ligou?". Se ele disser que sim, chame
+anotar_contato com telefone vazio. Se disser que não, peça o número com DDD e confira como sempre.
+"""
+
+
+def instrucoes_cliente(agora: datetime, linha_conhecida: bool = False) -> str:
     """A Amanda atendendo CLIENTE ao telefone: o jeito da casa do prompt do WhatsApp (n8n, lido em
     18/10), adaptado para voz, com o roteiro da loja passado pelo Lucca em 18/10: entender o caso,
     levar para o WhatsApp (foto, orçamento por escrito) e, se pedirem, dar o valor na ligação."""
@@ -206,7 +215,7 @@ Despedida curta e calorosa quando ele encerrar.
 
 # O que você sabe
 {conhecimento()}
-"""
+""" + (LINHA_CONHECIDA if linha_conhecida else "")
 
 
 async def _chamar(caminho: str, corpo: dict | None = None) -> dict:
@@ -270,6 +279,9 @@ class AmandaEquipe(Agent):
     def instrucoes(agora: datetime) -> str:
         return instrucoes(agora)
 
+    def _orcou(self, r: dict, modelo: str, quantidade: int) -> None:
+        """Depois de cada conta: a equipe não guarda nada; o cliente guarda para mandar no WhatsApp."""
+
     async def llm_node(self, chat_ctx: ChatContext, tools: list[llm.Tool], model_settings: ModelSettings):
         """O modelo de sempre, mas sem silêncio: "só um segundinho" se demorar, pedido para repetir
         se falhar de vez e sem o anúncio antes da calculadora (sem_silencio.py)."""
@@ -303,6 +315,7 @@ class AmandaEquipe(Agent):
             "acabamento": _opcional(acabamento, ACABAMENTOS, "nenhum"),
             "corFerragem": _opcional((cor_ferragem or "").upper(), {"BRANCA", "PRETA"}, "BRANCA"),
             "incluirInstalacao": incluir_instalacao})
+        self._orcou(r, modelo, quantidade)
         return _resultado(r)
 
     @function_tool()
@@ -317,6 +330,7 @@ class AmandaEquipe(Agent):
             "suporte": suporte, "modelo": modelo, "forro": _opcional(forro, {forro.strip()}, None),
             "quantidade": quantidade,
             "porta": porta})
+        self._orcou(r, f"Cortina {modelo.capitalize()}", quantidade)
         return _resultado(r)
 
     @function_tool()
@@ -358,27 +372,67 @@ def criar_sessao(turno=None) -> AgentSession:
 
 
 class AmandaCliente(AmandaEquipe):
-    """Mesmas ferramentas, outro público: o cliente ligando para a loja."""
+    """Mesmas ferramentas, outro público: o cliente ligando para a loja. Vai juntando a ligação
+    (ligacao.py) para mandar ao Dash quando ela terminar."""
+
+    def __init__(self, agora: datetime | None = None, chat_ctx: ChatContext | None = None,
+                 ligacao: Ligacao | None = None) -> None:
+        super().__init__(agora, chat_ctx)
+        self.agora = agora or datetime.now(FUSO)
+        self.ligacao = ligacao or Ligacao(inicio=self.agora)
 
     @staticmethod
     def instrucoes(agora: datetime) -> str:
         return instrucoes_cliente(agora)
 
+    async def conhecer_linha(self, numero: str | None) -> None:
+        """O número que a linha telefônica informou: ela passa a oferecer chamar nele."""
+        if not so_digitos(numero) or self.ligacao.telefone_linha:
+            return
+        self.ligacao.telefone_linha = numero
+        await self.update_instructions(instrucoes_cliente(self.agora, linha_conhecida=True))
+
+    def _orcou(self, r: dict, modelo: str, quantidade: int) -> None:
+        self.ligacao.orcou(r, modelo, quantidade)
+
     @function_tool()
     async def anotar_contato(self, context: RunContext, nome_completo: str, telefone: str,
                              assunto: Literal["orcamento", "duvida", "outro"], resumo: str) -> str:
-        """Anota o contato para o time chamar no WhatsApp. telefone com DDD, só números (17991234567).
+        """Anota o contato para o time chamar no WhatsApp. telefone com DDD, só números (17991234567),
+        ou vazio se o cliente aceitou ser chamado no número de onde ligou.
         resumo: o que o cliente quer em uma ou duas frases (modelo, medidas, valor passado, foto pendente)."""
-        numeros = "".join(c for c in telefone if c.isdigit())
+        numeros = so_digitos(telefone) or so_digitos(self.ligacao.telefone_linha)
+        if len(numeros) in (12, 13) and numeros.startswith("55"):
+            numeros = numeros[2:]
         if len(numeros) not in (10, 11):
             raise ToolError("Telefone incompleto: peça o número com DDD de novo.")
-        recado = {"quando": datetime.now(FUSO).isoformat(timespec="seconds"), "nome": nome_completo.strip(),
-                  "telefone": numeros, "assunto": assunto, "resumo": resumo.strip()}
-        # teste: arquivo local; para ir ao ar o recado precisa chegar no Dash/WhatsApp do time (PLANO.md)
-        RECADOS.parent.mkdir(parents=True, exist_ok=True)
-        with RECADOS.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(recado, ensure_ascii=False) + "\n")
+        # vai para o Dash quando a ligação terminar (ligacao.enviar): lead no CRM e mensagem no WhatsApp
+        self.ligacao.anotar(nome_completo, numeros, assunto, resumo)
         return "anotado"
+
+
+def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: AmandaCliente) -> None:
+    """Guarda a conversa, pega o número da linha (SIP) e manda tudo ao Dash quando a ligação acaba."""
+    lig = agente.ligacao
+
+    @session.on("conversation_item_added")
+    def _guardar(ev) -> None:
+        if getattr(ev.item, "type", None) == "message":
+            lig.ouvir(ev.item.role, ev.item.text_content)
+
+    def _linha(p) -> None:
+        # ligação de telefone (SIP): o LiveKit traz o número do cliente nesse atributo
+        if numero := p.attributes.get("sip.phoneNumber"):
+            asyncio.create_task(agente.conhecer_linha(numero))
+
+    ctx.room.on("participant_connected", _linha)
+    for p in ctx.room.remote_participants.values():
+        _linha(p)
+
+    async def _mandar_ao_dash() -> None:
+        print(f"ligação {lig.ref}: {await enviar(lig)}", flush=True)
+
+    ctx.add_shutdown_callback(_mandar_ao_dash)
 
 
 # PUBLICO=cliente (atende cliente ao telefone) ou equipe (tira dúvida da equipe da loja)
@@ -393,6 +447,8 @@ async def conversar(ctx: agents.JobContext) -> None:
     session = criar_sessao()
     agente = AmandaCliente(agora) if PUBLICO == "cliente" else AmandaEquipe(agora)
     await session.start(room=ctx.room, agent=agente)
+    if isinstance(agente, AmandaCliente):
+        acompanhar_ligacao(ctx, session, agente)
     Vigia(session)
     asyncio.create_task(FALAS.preparar(session.tts, [FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ESPERA, FALA_REPETIR, FALA_ERRO]))
     # fala fixa: o Muse recusa pedido sem mensagem de usuário, e assim a voz sai na hora

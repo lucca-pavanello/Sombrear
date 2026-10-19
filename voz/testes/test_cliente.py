@@ -112,9 +112,7 @@ async def test_outro_assunto_pede_nome_completo_e_nao_resolve() -> None:
                              "telefone para passar pro time, uma coisa por vez.")
 
 
-async def test_anota_o_contato_e_diz_que_o_time_chama(tmp_path, monkeypatch) -> None:
-    import equipe
-    monkeypatch.setattr(equipe, "RECADOS", tmp_path / "recados.jsonl")
+async def test_anota_o_contato_e_diz_que_o_time_chama() -> None:
     modelo, session = await _sessao([
         ("user", "Oi, eu comprei uma persiana semana passada e queria saber quando vão instalar."),
         ("assistant", "Entendi, vou passar pro time. Qual é o seu nome completo?"),
@@ -129,6 +127,24 @@ async def test_anota_o_contato_e_diz_que_o_time_chama(tmp_path, monkeypatch) -> 
         assert args, "não anotou o contato"
         assert "".join(c for c in args[-1]["telefone"] if c.isdigit()) == "17991234567"
         assert args[-1]["assunto"] == "outro"
-        linhas = (tmp_path / "recados.jsonl").read_text(encoding="utf-8").splitlines()
-        assert json.loads(linhas[-1])["nome"].startswith("Marcos")
+        contato = session.current_agent.ligacao.contato
+        assert contato["nome"].startswith("Marcos") and contato["telefone"] == "17991234567"
         await julgar(result, "Diz que o time vai mandar mensagem ou chamar no WhatsApp. Não promete data de instalação.")
+
+
+async def test_ligou_de_um_numero_conhecido_oferece_chamar_nele() -> None:
+    modelo, session = await _sessao([
+        ("user", "Oi, eu comprei uma persiana semana passada e queria saber quando vão instalar."),
+        ("assistant", "Entendi, vou passar pro time. Qual é o seu nome completo?"),
+    ])
+    async with modelo, session:
+        await session.current_agent.conhecer_linha("+5517998765432")
+        result = await session.run(user_input="Marcos Antônio Ribeiro.")
+        assert not _chamou(result, "anotar_contato")
+        await julgar(result, "Pergunta se pode chamar no WhatsApp no número de onde a pessoa ligou, sem pedir "
+                             "que ela dite o número.")
+        result = await session.run(user_input="Pode sim.")
+        args = _chamou(result, "anotar_contato")
+        assert args, "não anotou o contato"
+        assert session.current_agent.ligacao.contato["telefone"] == "17998765432"
+        assert args[-1]["assunto"] == "outro"

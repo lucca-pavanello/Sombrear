@@ -13,6 +13,10 @@ sem deploy, até ser aprovado ouvindo. Fases e decisões em `PLANO.md`.
   limite no nome ("ATÉ 1,40 X 1,40") só entra se a medida couber; medida do vão soma os aumentos
   da loja (persiana +0,20 × +0,20; cortina +0,40 × +0,40, porta +0,20 na altura). A voz chama por
   HTTP o `orcamento/servidor.ts`.
+- **Ligação → CRM → WhatsApp**: `ligacao.py` junta a ligação e manda, quando ela termina, para
+  `supabase/functions/registrar-ligacao` (lead no CRM, mensagens e nota no Chatwoot, lembrete na
+  memória da Amanda do WhatsApp). Env na voz: `REGISTRAR_LIGACAO_URL` e `LIGACAO_SECRET`; sem a URL
+  grava em `~/.cache/sombrear-voz/recados.jsonl`. Detalhe no PLANO.md.
 - **Atendimento com agenda (fase 4)**: `atendimento.py` e `supabase/migrations/0031_agenda_visitas.sql`.
   Pronto e testado, guardado para quando o atendimento de cliente entrar.
 
@@ -22,7 +26,7 @@ sem deploy, até ser aprovado ouvindo. Fases e decisões em `PLANO.md`.
 uv sync
 cp .env.example .env.local                                 # META_API_KEY = META_API_KEY_DASH
 npx tsx voz/orcamento/servidor.ts <pasta-da-foto-de-precos>  # na raiz do Dash, outro terminal
-uv run pytest                                              # 11 conversas com o modelo de verdade
+uv run pytest                                              # 40 testes, a maioria com o modelo de verdade
 uv run equipe.py console --text                            # conversar com a Amanda digitando
 uv run --group local python local/servidor_voz.py         # ouvir e falar na máquina (KOKORO_DIR)
 uv run --group local equipe.py console                     # conversar pelo microfone
