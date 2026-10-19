@@ -59,7 +59,7 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
      nome completo e telefone. O contato vai para `anotar_contato`, que no teste grava em
      `~/.cache/sombrear-voz/recados.jsonl`. **Para ir ao ar, o recado tem que chegar no time**
      (Dash ou WhatsApp da loja), senão a promessa de "o time te chama" não se cumpre.
-   - Ligação → CRM → WhatsApp (19/10, feito em código, **ainda não no ar**): quando a ligação
+   - Ligação → CRM → WhatsApp (19/10, **função no ar**; a voz só usa quando atender telefone de verdade): quando a ligação
      termina, a voz (`ligacao.py`) manda conversa, nome, telefone, assunto e último orçamento para
      a edge function `registrar-ligacao`. Ela guarda a ligação (`ligacoes`, migration 0032), cria
      ou atualiza o lead no CRM com origem "Ligação", manda 2 mensagens no WhatsApp pelo Chatwoot
@@ -68,8 +68,10 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
      equipe e um lembrete na memória da Amanda do WhatsApp, para ela continuar de onde a ligação
      parou. Se a equipe já assumiu o lead (etiqueta humano), só a nota. Ligação de telefone (SIP)
      traz o número: ela oferece chamar nele em vez de pedir. Repetir o envio não duplica (`ref`).
-     Para ligar: aplicar a 0032, publicar a função, criar o secret `LIGACAO_SECRET` (o mesmo na
-     voz, com `REGISTRAR_LIGACAO_URL`) e testar de ponta a ponta com o número do Lucca.
+     No ar em 19/10: 0032 aplicada, `registrar-ligacao` publicada (sem JWT, protegida pelo
+     `LIGACAO_SECRET`, que também fica em `~/.secrets/sombrear-voz.env` com `REGISTRAR_LIGACAO_URL`).
+     Testada de ponta a ponta com o número do Lucca: lead atualizado, nota e etiqueta no Chatwoot,
+     memória da Amanda do WhatsApp e as 2 mensagens chegaram no celular dele.
    - Cérebro mais rápido (19/10): o Muse pensa antes de responder mesmo no "minimal" (50 a 80 tokens
      de raciocínio até num "oi", sem como desligar) e varia de 1,3 a 5 s. Medidos 8 modelos com o
      prompt real: DeepSeek V4.1 Flash sem raciocínio ~1,1 s até a 1ª palavra e 3 erros em 39 testes
