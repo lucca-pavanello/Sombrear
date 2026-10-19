@@ -38,6 +38,7 @@ except ImportError:  # pragma: no cover
 from agenda import FUSO
 from frases import TrechosCurtos
 from ligacao import Ligacao, enviar, so_digitos
+from reacao import TODAS as REACOES, Reacoes, grupo, sem_reacao
 from sem_silencio import (FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia,
                           ESPERA, ESPERA_DEPOIS_DA_CONTA, com_espera, fala_calcular, sem_anuncio)
 from modelo import criar_llm
@@ -46,6 +47,10 @@ load_dotenv(".env.local")
 
 URL_ORCAMENTO = os.environ.get("URL_ORCAMENTO", "http://127.0.0.1:8791")
 URL_VOZ = os.environ.get("URL_VOZ", "http://127.0.0.1:8792/v1")  # local/servidor_voz.py
+# REACAO=0 desliga a reação curta na hora em que o cliente termina (reacao.py)
+REACAO = os.environ.get("REACAO", "1") == "1"
+# o áudio pronto de todas as falas fixas, gerado no começo da sessão (sem_silencio.FALAS)
+FALAS_FIXAS = [FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ESPERA, FALA_REPETIR, FALA_ERRO, *REACOES]
 # Teste às cegas da fase 3: VOZ=kokoro (padrão, na máquina), elevenlabs ou cartesia; VOZ_ID escolhe a
 # voz da paga (local/listar_vozes.py). As chaves ficam no ~/.secrets, nunca aqui.
 VOZ = os.environ.get("VOZ", "kokoro")
@@ -274,6 +279,7 @@ def _resultado(r: dict) -> str:
 class AmandaEquipe(Agent):
     def __init__(self, agora: datetime | None = None, chat_ctx: ChatContext | None = None) -> None:
         super().__init__(instructions=self.instrucoes(agora or datetime.now(FUSO)), chat_ctx=chat_ctx)
+        self.reacoes = Reacoes()
 
     @staticmethod
     def instrucoes(agora: datetime) -> str:
@@ -294,8 +300,25 @@ class AmandaEquipe(Agent):
         elif model_settings.tool_choice not in (None, "auto") and is_given(model_settings.tool_choice):
             model_settings = ModelSettings()
         resposta = sem_anuncio(Agent.default.llm_node(self, chat_ctx, tools, model_settings))
+        if REACAO and _reage(chat_ctx):  # a reação rápida já saiu: a resposta não começa com outra
+            resposta = sem_reacao(resposta)
         async for chunk in com_espera(resposta, espera=ESPERA_DEPOIS_DA_CONTA if depois_da_conta else ESPERA):
             yield chunk
+
+    async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: llm.ChatMessage) -> None:
+        """Reação curta pronta assim que o turno fecha (reacao.py). Não mexe no contexto: assim a
+        resposta que o modelo começou antes do turno fechar continua valendo."""
+        if not REACAO:
+            return
+        anterior = next((m.text_content or "" for m in reversed(turn_ctx.items)
+                         if m.type == "message" and m.role == "assistant"), "")
+        if frase := self.reacoes.escolher(new_message.text_content or "", anterior):
+            FALAS.dizer(self.session, frase)
+
+    def _anunciar_conta(self, session: AgentSession) -> None:
+        """"Vou calcular", a não ser que a reação do turno já tenha sido "Deixa eu ver."."""
+        if not (REACAO and self.reacoes.pediu_preco_agora()):
+            FALAS.dizer(session, fala_calcular())
 
     @function_tool()
     async def orcar_persiana(self, context: RunContext, modelo: Modelo, largura: float, altura: float,
@@ -307,7 +330,7 @@ class AmandaEquipe(Agent):
         tipo_tecido: blackout, decorativo, tela_solar_1 ou tela_solar_3 (vazio = qualquer). Tela solar só
         com a porcentagem que a pessoa DISSE; se ela não disse, não chame: pergunte "um ou três por cento?".
         acabamento: nenhum, bando_branco, bando_preto, barra ou kit_box. cor_ferragem: BRANCA ou PRETA."""
-        FALAS.dizer(context.session, fala_calcular())
+        self._anunciar_conta(context.session)
         r = await _chamar("/persiana", {
             "modelo": modelo, "largura": largura, "altura": altura, "medidaDoVao": medida_do_vao,
             "quantidade": quantidade, "tecido": _opcional(tecido, {tecido.strip()}, None),
@@ -324,7 +347,7 @@ class AmandaEquipe(Agent):
                             modelo: Literal["wave", "pregas", "franzida"] = "wave", forro: str = "",
                             quantidade: int = 1, porta: bool = False) -> str:
         """Calcula a prévia de cortina pelo motor do Dash. tecido e forro: nomes de listar_tecidos sem modelo."""
-        FALAS.dizer(context.session, fala_calcular())
+        self._anunciar_conta(context.session)
         r = await _chamar("/cortina", {
             "largura": largura, "altura": altura, "medidaDoVao": medida_do_vao, "tecido": tecido,
             "suporte": suporte, "modelo": modelo, "forro": _opcional(forro, {forro.strip()}, None),
@@ -341,6 +364,13 @@ class AmandaEquipe(Agent):
         tipo = _opcional(tipo_tecido, TIPOS, None)
         q = "" if modelo is None else f"?modelo={modelo}" + (f"&tipo={tipo}" if tipo else "")
         return json.dumps(await _chamar("/tecidos" + q), ensure_ascii=False)
+
+
+def _reage(chat_ctx: ChatContext) -> bool:
+    """O turno que o modelo vai responder é de cliente e teve reação rápida."""
+    ultimo = chat_ctx.items[-1] if chat_ctx.items else None
+    return (ultimo is not None and ultimo.type == "message" and ultimo.role == "user"
+            and grupo(ultimo.text_content or "") is not None)
 
 
 def criar_voz() -> tts.TTS:
@@ -513,7 +543,7 @@ async def conversar(ctx: agents.JobContext) -> None:
     if isinstance(agente, AmandaCliente):
         acompanhar_ligacao(ctx, session, agente)
     Vigia(session)
-    asyncio.create_task(FALAS.preparar(session.tts, [FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ESPERA, FALA_REPETIR, FALA_ERRO]))
+    asyncio.create_task(FALAS.preparar(session.tts, FALAS_FIXAS))
     # fala fixa: o Muse recusa pedido sem mensagem de usuário, e assim a voz sai na hora
     await session.say(abertura(agora) if PUBLICO == "cliente" else "Oi, aqui é a Amanda. Em que posso ajudar?")
 

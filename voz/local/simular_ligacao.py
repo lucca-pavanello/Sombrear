@@ -18,8 +18,8 @@ import soundfile as sf
 from livekit import rtc
 from livekit.agents.voice import io
 
-from equipe import AmandaEquipe, criar_sessao
-from sem_silencio import FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia
+from equipe import FALAS_FIXAS, AmandaEquipe, criar_sessao
+from sem_silencio import FALAS, Vigia
 
 ESPERA = 14.0
 T0 = time.perf_counter()
@@ -111,7 +111,7 @@ async def main(wavs: list[str]) -> None:
                lambda ev: hasattr(ev.item, "role") and print(f"{agora()}  [{ev.item.role}] {ev.item.text_content}"))
     session.on("user_input_transcribed",
                lambda ev: ev.is_final and print(f"{agora()}  (ouviu) {ev.transcript!r}"))
-    await FALAS.preparar(session.tts, [FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ESPERA, FALA_REPETIR, FALA_ERRO])
+    await FALAS.preparar(session.tts, FALAS_FIXAS)
     _say = session.say
 
     def say(texto, **kw):

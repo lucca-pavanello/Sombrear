@@ -9,7 +9,8 @@ orçamento (e do local/servidor_voz.py com OUVIDO=local ou VOZ=kokoro).
 Por turno: parou_fala = a fala de quem liga acabou de verdade (fim do wav); fim_turno = da parada
 até a sessão decidir que o turno acabou (VAD + transcrição + detector + espera mínima); texto =
 quanto a transcrição chegou depois do fim da fala (pelo VAD); llm = 1º token do modelo; voz = 1º
-áudio da voz; total = da parada até o 1º áudio sair (o que quem liga sente).
+áudio da voz; total = da parada até o 1º áudio sair (o que quem liga sente); resposta = até o 1º
+som da resposta do modelo (depois da reação, quando ela sai; REACAO=0 desliga).
 """
 
 from __future__ import annotations
@@ -30,8 +31,8 @@ from livekit.plugins.turn_detector.multilingual import MultilingualModel, _EUORu
 
 import simular_ligacao as sim
 from agenda import FUSO
-from equipe import AmandaCliente, abertura, criar_sessao
-from sem_silencio import FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia
+from equipe import FALAS_FIXAS, AmandaCliente, abertura, criar_sessao
+from sem_silencio import FALAS, Vigia
 
 sim.ESPERA = float(os.environ.get("ESPERA", "12"))
 
@@ -76,8 +77,21 @@ class Turnos:
             t["voz"] = m.ttfb
 
     def audio_saiu(self) -> None:
-        if self.atual is not None and "total" not in self.atual:
-            self.atual["total"] = time.perf_counter() - self.atual["parou"]
+        """Cada fala que começa a tocar: a 1ª é o que quem liga ouve primeiro; com reação (reacao.py),
+        a 2ª é a resposta do modelo."""
+        t = self.atual
+        if t is None:
+            return
+        dt = time.perf_counter() - t["parou"]
+        t.setdefault("total", dt)
+        if "reacao" not in t or "resposta" in t:
+            t.setdefault("resposta", dt)
+        elif dt > t["total"]:
+            t["resposta"] = dt
+
+    def reagiu(self, frase: str | None) -> None:
+        if frase and self.atual is not None:
+            self.atual["reacao"] = frase
 
 
 async def main(wavs: list[str]) -> None:
@@ -104,21 +118,30 @@ async def main(wavs: list[str]) -> None:
     session.on("metrics_collected", lambda ev: turnos.metrica(ev.metrics))
     session.on("conversation_item_added",
                lambda ev: hasattr(ev.item, "role") and print(f"{sim.agora()}  [{ev.item.role}] {ev.item.text_content}"))
-    await FALAS.preparar(session.tts, [FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ESPERA, FALA_REPETIR, FALA_ERRO])
+    await FALAS.preparar(session.tts, FALAS_FIXAS)
     agora = datetime.now(FUSO)
     ctx = ChatContext()
     ctx.add_message(role="assistant", content=abertura(agora))  # como se ela já tivesse atendido
-    await session.start(AmandaCliente(agora, chat_ctx=ctx))
+    agente = AmandaCliente(agora, chat_ctx=ctx)
+    _escolher = agente.reacoes.escolher
+
+    def escolher(*a, **kw):
+        frase = _escolher(*a, **kw)
+        turnos.reagiu(frase)
+        return frase
+
+    agente.reacoes.escolher = escolher
+    await session.start(agente)
     Vigia(session)
     await asyncio.sleep(1.0 + sum(sf.info(w).duration for w in wavs) + sim.ESPERA * len(wavs) + 12)
     await session.aclose()
 
     cfg = {k: os.environ.get(k, "") for k in ("OUVIDO", "VOZ", "FIM_MIN", "FIM_MAX", "LLM", "TURNO")}
     print("\nconfig:", " ".join(f"{k}={v}" for k, v in cfg.items() if v))
-    cols = ["fim_turno", "texto", "llm", "voz", "total"]
+    cols = ["fim_turno", "texto", "llm", "voz", "total", "resposta"]
     print("turno  " + "  ".join(f"{c:>9}" for c in cols))
     for i, t in enumerate(turnos.linhas, 1):
-        print(f"{i:5d}  " + "  ".join(f"{t[c]:9.2f}" if c in t else f"{'-':>9}" for c in cols))
+        print(f"{i:5d}  " + "  ".join(f"{t[c]:9.2f}" if c in t else f"{'-':>9}" for c in cols) + f"  {t.get('reacao', '')}")
     med = {c: statistics.median([t[c] for t in turnos.linhas if c in t]) for c in cols
            if any(c in t for t in turnos.linhas)}
     print("mediana " + "  ".join(f"{c}={v:.2f}" for c, v in med.items()))

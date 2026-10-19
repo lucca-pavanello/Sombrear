@@ -80,6 +80,10 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
      dos 39 testes sem erro. Custo estimado ~US$ 0,004 por ligação de 3 min (o dobro no pico da
      China). Atenção para ir ao ar: os dados passam por servidor na China (nome e telefone do
      cliente), conferir a LGPD.
+   - Tempo de resposta (19/10, `local/medir_turnos.py`): ouvir pelo Deepgram e fim de fala mais curto
+     levaram a mediana de 2,69 s para ~2,0 s até o 1º som; e a reação curta pronta na hora em que o
+     cliente termina (`reacao.py`, por regra, na dúvida nada) levou o 1º som para ~0,8 s, com a
+     resposta do modelo chegando em ~2,0 s logo depois dela.
    - Voz (18/10): medido no PC, só a Cartesia (pt-BR nativa, ~0,4 s até o 1º som, plano grátis)
      serve ao vivo; Supertonic 2,6 a 3,2 s, OmniVoice 10 a 30 vezes mais lento que o tempo real e com
      pesos sem uso comercial, Piper sem voz feminina em pt-BR. Ordem pedida pelo Lucca: primeiro

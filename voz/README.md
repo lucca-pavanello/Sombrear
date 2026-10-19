@@ -26,7 +26,7 @@ sem deploy, até ser aprovado ouvindo. Fases e decisões em `PLANO.md`.
 uv sync
 cp .env.example .env.local                                 # META_API_KEY = META_API_KEY_DASH
 npx tsx voz/orcamento/servidor.ts <pasta-da-foto-de-precos>  # na raiz do Dash, outro terminal
-uv run pytest                                              # 40 testes, a maioria com o modelo de verdade
+uv run pytest                                              # 90 testes, boa parte com o modelo de verdade
 uv run equipe.py console --text                            # conversar com a Amanda digitando
 uv run --group local python local/servidor_voz.py         # ouvir e falar na máquina (KOKORO_DIR)
 uv run --group local equipe.py console                     # conversar pelo microfone
@@ -119,6 +119,15 @@ das falas: "Isso." e "Silva" sumiram e a conversa travou), ElevenLabs Scribe v2 
 de texto e errou "É de rolo, blackout" como o Parakeet) e cortar a 1ª frase mais cedo (sem
 diferença medível: a voz já começa 0,3 s depois do texto). Sem o servidor de voz local (só sobe com
 `-Ouvido local` ou `-Voz kokoro`), o PC fica com ~2 GB a mais livres.
+
+Reação curta (`reacao.py`, `REACAO=0` desliga): quando o cliente termina, uma regra sobre o texto
+final escolhe "Certo." / "Anotado." / "Beleza." (dado), "Deixa eu ver." (preço), "Entendi." /
+"Poxa, entendi." (problema) ou "Tá joia." / "Combinado." (sim), e o áudio pronto sai na hora; na
+dúvida (cumprimento, "não", pergunta aberta, fala ambígua) não sai nada. O modelo não fica sabendo
+(mudar o contexto anularia a resposta que ele já começou antes do turno fechar): o começo da
+resposta dele perde a reação que ele mesmo puser. Depois de "Deixa eu ver." a calculadora não
+anuncia a conta de novo. Medido em 19/10, mediana por turno: 1º som 2,02 s sem a reação, 0,78 e
+0,79 s com ela (7 de 8 turnos reagiram na 2ª rodada); a resposta do modelo segue em ~2,0 s.
 
 ## Etapas
 
