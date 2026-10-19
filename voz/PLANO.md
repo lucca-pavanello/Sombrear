@@ -59,6 +59,14 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
      nome completo e telefone. O contato vai para `anotar_contato`, que no teste grava em
      `~/.cache/sombrear-voz/recados.jsonl`. **Para ir ao ar, o recado tem que chegar no time**
      (Dash ou WhatsApp da loja), senão a promessa de "o time te chama" não se cumpre.
+   - Cérebro mais rápido (19/10): o Muse pensa antes de responder mesmo no "minimal" (50 a 80 tokens
+     de raciocínio até num "oi", sem como desligar) e varia de 1,3 a 5 s. Medidos 8 modelos com o
+     prompt real: DeepSeek V4.1 Flash sem raciocínio ~1,1 s até a 1ª palavra e 3 erros em 39 testes
+     (GPT-5 mini 5, Gemini 3.8 Flash 5 mas 1,8 s, os outros rápidos 9 a 14). Escolha do Lucca:
+     DeepSeek, padrão na voz (`LLM=muse` volta). Depois do ajuste do prompt: 3 rodadas seguidas
+     dos 39 testes sem erro. Custo estimado ~US$ 0,004 por ligação de 3 min (o dobro no pico da
+     China). Atenção para ir ao ar: os dados passam por servidor na China (nome e telefone do
+     cliente), conferir a LGPD.
    - Voz (18/10): medido no PC, só a Cartesia (pt-BR nativa, ~0,4 s até o 1º som, plano grátis)
      serve ao vivo; Supertonic 2,6 a 3,2 s, OmniVoice 10 a 30 vezes mais lento que o tempo real e com
      pesos sem uso comercial, Piper sem voz feminina em pt-BR. Ordem pedida pelo Lucca: primeiro
@@ -93,6 +101,6 @@ todo mês, mais custo por ligação.
 3. O fixo (17) 3304-1354: a IA atende só quando ninguém pega (desvio) ou sempre, passando para a
    loja quando precisa? Portar o número ou desviar para um número SIP?
 4. Ligação ativa: quais das cinco a loja topa, e em que horário.
-5. Cérebro mais rápido na voz: o Muse leva 2 a 3 s até a primeira palavra (com raciocínio
+5. ~~Cérebro mais rápido na voz~~ (DeepSeek, 19/10, ver fase 3): o Muse leva 2 a 3 s até a primeira palavra (com raciocínio
    "minimal"; sem ele, 5 a 9 s). Ficar no Muse e disfarçar ("deixa eu calcular" gravado antes da
    conta) ou testar um modelo rápido só para a voz (custo novo)?
