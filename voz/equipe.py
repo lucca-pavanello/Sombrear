@@ -495,7 +495,9 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
         _linha(p)
 
     async def _mandar_ao_dash() -> None:
-        print(f"ligação {lig.ref}: {await enviar(lig)}", flush=True)
+        resultado = await enviar(lig)
+        print(f"ligação {lig.ref}: {resultado}", flush=True)
+        registrar_envio(lig, resultado)
 
     # manda uma vez só, no que vier primeiro: a sessão fechar ou o job encerrar (no console o
     # encerramento pode não chamar o shutdown); repetir também não duplica no Dash (ref)
@@ -516,16 +518,34 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
     # teste no PC (console): não há como desligar, então criar este arquivo fecha a sessão como se
     # o cliente tivesse desligado (ligar.ps1 -Modo console define DESLIGAR_ARQUIVO)
     if arq := os.environ.get("DESLIGAR_ARQUIVO"):
-        asyncio.create_task(_desligar_quando_existir(Path(arq), session))
+        asyncio.create_task(_desligar_quando_existir(Path(arq), session, _uma_vez))
 
 
-async def _desligar_quando_existir(arq: Path, session: AgentSession) -> None:
+async def _desligar_quando_existir(arq: Path, session: AgentSession, mandar) -> None:
     arq.unlink(missing_ok=True)
     while not arq.exists():
         await asyncio.sleep(0.5)
     arq.unlink(missing_ok=True)
     print("desligando a ligação de teste", flush=True)
+    # no console o processo pode acabar junto com a sessão: manda antes de fechar
+    await mandar()
     await session.aclose()
+
+
+ENVIOS = RECADOS.parent / "ligacoes.log"
+
+
+def registrar_envio(lig: Ligacao, resultado: str) -> None:
+    """Uma linha por ligação com o que aconteceu no envio (sem a conversa): dá para conferir
+    depois do teste no PC, onde a janela do console não fica visível."""
+    try:
+        ENVIOS.parent.mkdir(parents=True, exist_ok=True)
+        with ENVIOS.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"quando": datetime.now(FUSO).isoformat(timespec="seconds"), "ref": lig.ref,
+                                "resultado": resultado, "falas_cliente": sum(x["quem"] == "cliente" for x in lig.falas),
+                                "anotou_contato": lig.contato is not None}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 # PUBLICO=cliente (atende cliente ao telefone) ou equipe (tira dúvida da equipe da loja)
