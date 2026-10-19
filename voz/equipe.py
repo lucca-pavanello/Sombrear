@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 from num2words import num2words
 from livekit import agents
 from livekit.agents import (Agent, AgentServer, AgentSession, APIConnectOptions, ChatContext, ModelSettings,
-                            RunContext, ToolError, function_tool, llm, tts)
+                            RunContext, ToolError, function_tool, inference, llm, stt, tts)
 from livekit.agents.utils import is_given
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero
@@ -349,21 +349,56 @@ def criar_voz() -> tts.TTS:
         return elevenlabs.TTS(model="eleven_flash_v2_5", language="pt", **kw)
     if VOZ == "cartesia":
         kw = {"voice": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
+        # VOZ_VELOCIDADE (0,6 a 2,0) e VOZ_EMOCAO (Content, Calm, Affectionate...): amostras em
+        # ~/.cache/sombrear-voz/amostras-ana-paula; sem nada, a Ana Paula do jeito que veio
+        if os.environ.get("VOZ_VELOCIDADE"):
+            kw["speed"] = float(os.environ["VOZ_VELOCIDADE"])
+        if os.environ.get("VOZ_EMOCAO"):
+            kw["emotion"] = os.environ["VOZ_EMOCAO"]
         return cartesia.TTS(model="sonic-3", language="pt", **kw)
     return tts.StreamAdapter(
         tts=openai.TTS(model="kokoro", voice="amanda", base_url=URL_VOZ, api_key="local", response_format="wav"),
         sentence_tokenizer=TrechosCurtos())
 
 
+def criar_ouvido() -> stt.STT:
+    """OUVIDO=deepgram/nova-3 (padrão, pelo LiveKit Inference), local (Parakeet/Canary na máquina),
+    cartesia (ink-whisper) ou elevenlabs (Scribe v2 realtime). Medido em 19/10 (local/medir_turnos.py):
+    o Deepgram entrega o texto ~0,3 s depois da fala contra ~1,05 s do local e pegou as 8 falas
+    inteiras; o ink-whisper cortou começo e fim ("Isso." e "Silva" sumiram) e o Scribe errou mais e
+    demorou ~0,8 s. O local também erra fala curta ("É de rolo, blackout" virou "Edge Holo Black Coach")."""
+    qual = os.environ.get("OUVIDO", "deepgram/nova-3")
+    if qual == "cartesia":
+        return cartesia.STT(model="ink-whisper", language="pt")
+    if qual == "elevenlabs":
+        return elevenlabs.STT(model="scribe_v2_realtime", language_code="pt",
+                              server_vad={"vad_silence_threshold_secs": float(os.environ.get("OUVIDO_SILENCIO", "0.5"))})
+    if "/" in qual:  # pelo LiveKit Inference, na conta LiveKit que já existe (ex.: deepgram/nova-3)
+        return inference.STT(model=qual, language="pt")
+    return openai.STT(model="parakeet", language="pt", base_url=URL_VOZ, api_key="local", use_realtime=False)
+
+
 def criar_sessao(turno=None) -> AgentSession:
-    """Ouvir (Parakeet/Canary) e falar (Kokoro, voz J) na própria máquina; o turno é do VAD + detector.
-    turno: outro detector de fim de fala (a simulação usa "vad": o detector precisa do job)."""
+    """Ouvir (criar_ouvido) e falar (criar_voz); o turno é do VAD + detector.
+    turno: outro detector de fim de fala (a simulação usa "vad": o detector precisa do job).
+    FIM_MIN/FIM_MAX: espera mínima e máxima (s) depois da fala antes de responder; SILENCIO: quanto
+    silêncio o VAD espera para dizer que a fala parou; VOZ_ANTES=0 desliga a voz gerando a resposta
+    antes de o turno fechar (se a pessoa continuar falando, descarta). Os padrões (0,3 / 0,3 / 2,0)
+    baixaram o fim de turno de ~0,95 para ~0,7 s em 19/10 e ela seguiu esperando quem pausa no meio
+    da frase ("dezessete, nove nove um dois três, ... quatro cinco seis sete")."""
+    def num(nome: str, padrao: float) -> float:
+        return float(os.environ.get(nome) or padrao)
+
     return AgentSession(
-        stt=openai.STT(model="parakeet", language="pt", base_url=URL_VOZ, api_key="local", use_realtime=False),
+        stt=criar_ouvido(),
         llm=criar_llm(),
         tts=criar_voz(),
-        vad=silero.VAD.load(),
-        turn_detection=turno or MultilingualModel(),
+        vad=silero.VAD.load(min_silence_duration=num("SILENCIO", 0.3)),
+        turn_handling={
+            "turn_detection": turno or MultilingualModel(),
+            "endpointing": {"min_delay": num("FIM_MIN", 0.3), "max_delay": num("FIM_MAX", 2.0)},
+            "preemptive_generation": {"preemptive_tts": os.environ.get("VOZ_ANTES", "1") == "1"},
+        },
         # o padrão espera 10 s por tentativa (no teste foram ~50 s mudos); com 5 s e a fala de espera
         # aos 3 s, ela nunca fica calada
         conn_options=SessionConnectOptions(llm_conn_options=APIConnectOptions(max_retry=2, retry_interval=0.3,

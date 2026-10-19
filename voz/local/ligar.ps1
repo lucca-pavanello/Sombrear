@@ -6,11 +6,17 @@
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Modo console   # microfone do PC
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Publico equipe # a versao da equipe
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz cartesia    # Ana Paula, pt-BR nativa
+#   ... -Ouvido local                     # ouvir no PC (Parakeet/Canary) em vez do Deepgram (LiveKit Inference)
+#   ... -Velocidade 1.1 -Emocao Content   # controles da Ana Paula (amostras em ~/.cache/sombrear-voz)
+#
+# O servidor de voz da maquina (Parakeet, Canary e Kokoro, ~2 GB de memoria) so sobe com -Ouvido local
+# ou -Voz kokoro.
 #
 # Chaves (nunca no repo): ~/.secrets/sombrear-meta.env (META_API_KEY_DASH) e, fora do console,
 # ~/.secrets/sombrear-voz.env (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, ELEVEN_API_KEY,
 # CARTESIA_API_KEY, VOZ_ID opcional). Dados: ~/.cache/sombrear-voz (kokoro/ e precos/).
-param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente", [string]$VozId = "", [switch]$SemCanary)
+param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente", [string]$VozId = "", [switch]$SemCanary,
+      [string]$Ouvido = "deepgram/nova-3", [string]$Velocidade = "", [string]$Emocao = "")
 $ErrorActionPreference = "Stop"
 
 function Carregar([string]$arq, [hashtable]$troca) {
@@ -33,6 +39,10 @@ $env:VOZ = $Voz
 # o VOZ_ID do arquivo de chaves e da ElevenLabs (Jessica); na Cartesia o padrao e a Ana Paula (pt-BR nativa)
 if ($VozId) { $env:VOZ_ID = $VozId } elseif ($Voz -eq "cartesia") { $env:VOZ_ID = "1cf751f6-8749-43ab-98bd-230dd633abdb" }
 $env:PUBLICO = $Publico
+$env:OUVIDO = $Ouvido
+if ($Velocidade) { $env:VOZ_VELOCIDADE = $Velocidade }
+if ($Emocao) { $env:VOZ_EMOCAO = $Emocao }
+$vozLocal = ($Ouvido -eq "local") -or ($Voz -eq "kokoro")
 if ($SemCanary) { $env:SEM_CANARY = "1" }
 # no console nao ha como desligar: criar este arquivo encerra a ligacao (e manda ao Dash)
 if ($Modo -eq "console") { $env:DESLIGAR_ARQUIVO = "$HOME\.cache\sombrear-voz\desligar" }
@@ -45,12 +55,17 @@ New-Item -ItemType Directory -Force $logs | Out-Null
 
 $orc = Start-Process cmd -ArgumentList "/c", "npx tsx voz/orcamento/servidor.ts `"$dados\precos`"" -WorkingDirectory $raiz `
     -PassThru -WindowStyle Hidden -RedirectStandardOutput "$logs\orcamento.log" -RedirectStandardError "$logs\orcamento.err"
-$fala = Start-Process uv -ArgumentList "run", "--group", "local", "python", "local/servidor_voz.py" -WorkingDirectory $pastaVoz `
-    -PassThru -WindowStyle Hidden -RedirectStandardOutput "$logs\voz.log" -RedirectStandardError "$logs\voz.err"
+$fala = $null
+if ($vozLocal) {
+    $fala = Start-Process uv -ArgumentList "run", "--group", "local", "python", "local/servidor_voz.py" -WorkingDirectory $pastaVoz `
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput "$logs\voz.log" -RedirectStandardError "$logs\voz.err"
+}
 
 try {
-    Write-Host "Esperando os servidores (orcamento :8791, voz :8792)..."
-    foreach ($url in "http://127.0.0.1:8791/tecidos", "http://127.0.0.1:8792/v1/audio/speech") {
+    $urls = @("http://127.0.0.1:8791/tecidos")
+    if ($vozLocal) { $urls += "http://127.0.0.1:8792/v1/audio/speech" }
+    Write-Host "Esperando os servidores ($($urls -join ', '))..."
+    foreach ($url in $urls) {
         $ok = $false
         for ($i = 0; $i -lt 120 -and -not $ok; $i++) {
             try { Invoke-WebRequest $url -UseBasicParsing -TimeoutSec 2 | Out-Null; $ok = $true }
@@ -58,7 +73,7 @@ try {
         }
         if (-not $ok) { throw "Servidor nao subiu: $url (logs em $logs)" }
     }
-    Write-Host "Pronto. Voz: $Voz. Modo: $Modo. Publico: $Publico (agente sombrear-$Publico)."
+    Write-Host "Pronto. Voz: $Voz. Ouvido: $Ouvido. Modo: $Modo. Publico: $Publico (agente sombrear-$Publico)."
     Set-Location $pastaVoz
     uv run --group local equipe.py $Modo
 }

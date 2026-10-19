@@ -32,6 +32,7 @@ uv run --group local python local/servidor_voz.py         # ouvir e falar na má
 uv run --group local equipe.py console                     # conversar pelo microfone
 PYTHONPATH=. uv run --group local python local/medir_latencia.py <pasta-com-wavs>  # tempo por etapa
 PYTHONPATH=. uv run --group local python local/simular_ligacao.py <wav> [<wav>...]  # ligação simulada
+PYTHONPATH=. uv run --group local python local/medir_turnos.py <wav> [<wav>...]  # ligação de cliente, tempo por turno
 ```
 
 A foto dos preços é um JSON por tabela `precos_*` (mais `precos_tecido_modelos`), lido só para
@@ -91,7 +92,7 @@ Os outros 10:
 | Entender | Muse (Meta) por API, a chave do Dash | centavos por conversa |
 | Falar (TTS) | Kokoro, voz "J" (pf_dora 50% + if_sara 25% + pm_alex 25%) | 0 |
 | Falar no teste da fase 3 | ElevenLabs Flash v2.5, voz Jessica (`cgSgspJ2msm6clMCkdW9`), escolhida às cegas pelo Lucca em 17/10/2026; começa a tocar em 0,27 s | grátis até 10 mil créditos |
-| Ouvir (STT) | Parakeet TDT 0.6b v3 int8 na CPU; fala curta no Canary 1b v2 (português fixo) | 0 |
+| Ouvir (STT) | Deepgram Nova-3 pelo LiveKit Inference (conta LiveKit que já existe; `OUVIDO=local` volta ao Parakeet TDT 0.6b v3 int8 na CPU, fala curta no Canary 1b v2) | US$ 0,0048/min de ligação (Build); local 0 |
 | Telefone | LiveKit SIP + número DDD 17 | ~US$ 1 a 4/mês + minuto |
 
 Medido em 17/10/2026 no PC (Ryzen 5 1600, sem GPU): Kokoro leva 1,3 a 2 s por frase curta (o
@@ -100,6 +101,24 @@ Kokoro depende de onde a voz rodar; por isso a fala vai cortada em vírgula (`fr
 trecho sai em 0,6 a 1,9 s. Ouvir: Parakeet 0,3 a 0,85 s por pergunta e acertou "1,80 por 1,20";
 Whisper small 5,5 a 7 s (codifica sempre 30 s), Whisper base 1,4 s mas errou as medidas. O Muse
 leva 2 a 3 s até a primeira palavra e hoje é o gargalo.
+
+Medido em 19/10/2026 com `local/medir_turnos.py` (8 falas de cliente com som de telefone, detector
+de turno de verdade, DeepSeek e Cartesia Ana Paula), mediana por turno, da parada da fala até o
+primeiro som:
+
+| | fim de turno | texto | 1º token | voz | total | turnos < 2 s |
+|---|---|---|---|---|---|---|
+| antes (Parakeet local, fim 0,55/0,5/3,0) | 1,52 | 1,05 | 1,04 | 0,31 | 2,69 | 0 de 8 |
+| Deepgram Nova-3 | 0,95 | 0,30 | 1,30 | 0,30 | 2,09 | 4 de 8 |
+| + fim de fala 0,3/0,3/2,0 e voz antes do turno fechar (padrão) | 0,70 | 0,33 | 1,05 | 0,30 | 1,98 a 2,08 | 3 a 5 de 8 |
+
+O que sobra é o DeepSeek: ~1 s até o 1º token com o prompt da Amanda (o cache já pega 6.656 dos
+6.875 tokens) e ~0,85 s até com um "Oi" de 5 tokens, então é o piso da rede até ele. Testados e
+não adotados: Cartesia ink-whisper (mais rápido, 0,83 s de fim de turno, mas cortou começo e fim
+das falas: "Isso." e "Silva" sumiram e a conversa travou), ElevenLabs Scribe v2 realtime (0,78 s
+de texto e errou "É de rolo, blackout" como o Parakeet) e cortar a 1ª frase mais cedo (sem
+diferença medível: a voz já começa 0,3 s depois do texto). Sem o servidor de voz local (só sobe com
+`-Ouvido local` ou `-Voz kokoro`), o PC fica com ~2 GB a mais livres.
 
 ## Etapas
 
