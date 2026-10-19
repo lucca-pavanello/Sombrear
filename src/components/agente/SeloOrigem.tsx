@@ -1,4 +1,4 @@
-import { Globe, HelpCircle, Instagram, Link2, MessageCircle, Search, Users } from 'lucide-react'
+import { Globe, HelpCircle, Instagram, Link2, MessageCircle, Phone, Search, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -16,6 +16,8 @@ export const ORIGENS = [
   { id: 'site',      rotulo: 'Site',      icone: Globe,         cor: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' },
   { id: 'indicacao', rotulo: 'Indicação', icone: Link2,         cor: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
   { id: 'direto',    rotulo: 'Direto',    icone: MessageCircle, cor: 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300' },
+  // lead que nasceu de uma ligação atendida pela Amanda de voz (edge function registrar-ligacao)
+  { id: 'ligacao',   rotulo: 'Ligação',   icone: Phone,         cor: 'border-teal-500/25 bg-teal-500/10 text-teal-700 dark:text-teal-300' },
 ] as const
 
 /**
