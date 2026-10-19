@@ -44,7 +44,8 @@ kokoro = Kokoro(os.path.join(os.environ["KOKORO_DIR"], "kokoro-v1.0.onnx"),
                 os.path.join(os.environ["KOKORO_DIR"], "voices-v1.0.bin"))
 VOZES = {"amanda": sum(p * kokoro.get_voice_style(v) for v, p in MISTURA_J.items()).astype(np.float32)}
 parakeet = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", quantization="int8")
-canary = onnx_asr.load_model("nemo-canary-1b-v2", quantization="int8")
+# SEM_CANARY=1: pouca memória livre (o Canary tem ~1 GB); as falas curtas também vão pro Parakeet
+canary = None if os.environ.get("SEM_CANARY") else onnx_asr.load_model("nemo-canary-1b-v2", quantization="int8")
 CURTA = 1.5
 MARGEM = np.zeros(int(0.3 * 16000), np.float32)
 
@@ -78,7 +79,7 @@ def para_16k(wav: bytes) -> np.ndarray:
 def ouvir(wav: bytes) -> str:
     t = time.perf_counter()
     audio = para_16k(wav)
-    curta = len(audio) < CURTA * 16000
+    curta = canary is not None and len(audio) < CURTA * 16000
     audio = np.concatenate([MARGEM, audio, MARGEM])
     if curta:
         texto = canary.recognize(audio, sample_rate=16000, language="pt").strip()

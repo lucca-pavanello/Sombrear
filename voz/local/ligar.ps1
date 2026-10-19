@@ -10,7 +10,7 @@
 # Chaves (nunca no repo): ~/.secrets/sombrear-meta.env (META_API_KEY_DASH) e, fora do console,
 # ~/.secrets/sombrear-voz.env (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, ELEVEN_API_KEY,
 # CARTESIA_API_KEY, VOZ_ID opcional). Dados: ~/.cache/sombrear-voz (kokoro/ e precos/).
-param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente", [string]$VozId = "")
+param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente", [string]$VozId = "", [switch]$SemCanary)
 $ErrorActionPreference = "Stop"
 
 function Carregar([string]$arq, [hashtable]$troca) {
@@ -33,6 +33,9 @@ $env:VOZ = $Voz
 # o VOZ_ID do arquivo de chaves e da ElevenLabs (Jessica); na Cartesia o padrao e a Ana Paula (pt-BR nativa)
 if ($VozId) { $env:VOZ_ID = $VozId } elseif ($Voz -eq "cartesia") { $env:VOZ_ID = "1cf751f6-8749-43ab-98bd-230dd633abdb" }
 $env:PUBLICO = $Publico
+if ($SemCanary) { $env:SEM_CANARY = "1" }
+# no console nao ha como desligar: criar este arquivo encerra a ligacao (e manda ao Dash)
+if ($Modo -eq "console") { $env:DESLIGAR_ARQUIVO = "$HOME\.cache\sombrear-voz\desligar" }
 $env:KOKORO_DIR = "$dados\kokoro"
 $env:PYTHONIOENCODING = "utf-8"
 $pastaVoz = Split-Path $PSScriptRoot -Parent

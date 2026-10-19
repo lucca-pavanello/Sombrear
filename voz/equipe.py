@@ -432,7 +432,35 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
     async def _mandar_ao_dash() -> None:
         print(f"ligação {lig.ref}: {await enviar(lig)}", flush=True)
 
-    ctx.add_shutdown_callback(_mandar_ao_dash)
+    # manda uma vez só, no que vier primeiro: a sessão fechar ou o job encerrar (no console o
+    # encerramento pode não chamar o shutdown); repetir também não duplica no Dash (ref)
+    envio: list[asyncio.Future] = []
+
+    def _uma_vez() -> asyncio.Future:
+        if not envio:
+            envio.append(asyncio.ensure_future(_mandar_ao_dash()))
+        return envio[0]
+
+    session.on("close", lambda _ev: _uma_vez())
+
+    async def _no_fim() -> None:
+        await _uma_vez()
+
+    ctx.add_shutdown_callback(_no_fim)
+
+    # teste no PC (console): não há como desligar, então criar este arquivo fecha a sessão como se
+    # o cliente tivesse desligado (ligar.ps1 -Modo console define DESLIGAR_ARQUIVO)
+    if arq := os.environ.get("DESLIGAR_ARQUIVO"):
+        asyncio.create_task(_desligar_quando_existir(Path(arq), session))
+
+
+async def _desligar_quando_existir(arq: Path, session: AgentSession) -> None:
+    arq.unlink(missing_ok=True)
+    while not arq.exists():
+        await asyncio.sleep(0.5)
+    arq.unlink(missing_ok=True)
+    print("desligando a ligação de teste", flush=True)
+    await session.aclose()
 
 
 # PUBLICO=cliente (atende cliente ao telefone) ou equipe (tira dúvida da equipe da loja)

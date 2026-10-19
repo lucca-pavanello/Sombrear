@@ -39,4 +39,5 @@ drop policy if exists ligacoes_ver on public.ligacoes;
 create policy ligacoes_ver on public.ligacoes for select to authenticated using (true);
 
 revoke all on public.ligacoes from anon;
+revoke insert, update, delete, truncate on public.ligacoes from authenticated;
 grant select on public.ligacoes to authenticated;
