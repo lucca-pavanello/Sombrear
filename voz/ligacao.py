@@ -59,8 +59,9 @@ class Ligacao:
                           "quantidade": quantidade, "total4x": r["total4x"], "totalAvista": r["totalAvista"],
                           "instalacao": r.get("instalacao"), "maisBarato": bool(r.get("maisBarato"))}
 
-    def anotar(self, nome: str, telefone: str, assunto: str, resumo: str) -> None:
-        self.contato = {"nome": nome.strip(), "telefone": telefone, "assunto": assunto, "resumo": resumo.strip()}
+    def anotar(self, nome: str, telefone: str, assunto: str, resumo: str, ambientes: list[str] | None = None) -> None:
+        self.contato = {"nome": nome.strip(), "telefone": telefone, "assunto": assunto, "resumo": resumo.strip(),
+                        "ambientes": [a.strip() for a in ambientes or [] if isinstance(a, str) and a.strip()]}
 
     @property
     def cliente_falou(self) -> bool:
@@ -72,6 +73,7 @@ class Ligacao:
             "ref": self.ref, "inicio": self.inicio.isoformat(), "fim": (fim or datetime.now(FUSO)).isoformat(),
             "telefone_chamador": self.telefone_linha, "telefone": c.get("telefone"), "nome": c.get("nome"),
             "assunto": c.get("assunto"), "resumo": c.get("resumo"), "orcamento": self.orcamento,
+            "ambientes": c.get("ambientes") or [],
             "transcricao": self.falas,
         }
 

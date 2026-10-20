@@ -40,7 +40,7 @@ def _ligacao() -> Ligacao:
     lig.ouvir("assistant", "Boa tarde, Amanda da Sombrear Decor aqui. Como posso te ajudar?")
     lig.ouvir("user", "Quanto fica uma rolô de dois por dois?")
     lig.orcou(CONTA, "Rolo", 1)
-    lig.anotar(" Juliana Prado ", "17998765432", "orcamento", " Rolô blackout 2 x 2. ")
+    lig.anotar(" Juliana Prado ", "17998765432", "orcamento", " Rolô blackout 2 x 2. ", [" sala ", ""])
     return lig
 
 
@@ -51,7 +51,7 @@ def test_junta_a_conversa_o_contato_e_o_orcamento() -> None:
     c = lig.corpo()
     assert c["ref"].startswith("voz-") and c["inicio"].startswith("2026-10-20T15:00")
     assert [f["quem"] for f in c["transcricao"]] == ["amanda", "cliente"]
-    assert c["nome"] == "Juliana Prado" and c["telefone"] == "17998765432" and c["resumo"] == "Rolô blackout 2 x 2."
+    assert c["nome"] == "Juliana Prado" and c["telefone"] == "17998765432" and c["resumo"] == "Rolô blackout 2 x 2." and c["ambientes"] == ["sala"]
     assert c["telefone_chamador"] == "+5517998765432"
     assert c["orcamento"] == {"modelo": "Rolo", "tecido": "BK Branco", "largura": 2.0, "altura": 2.0, "quantidade": 1,
                               "total4x": 931.0, "totalAvista": 884.45, "instalacao": 85.0, "maisBarato": True}
