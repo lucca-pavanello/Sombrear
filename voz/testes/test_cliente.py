@@ -151,6 +151,8 @@ async def test_numero_conhecido_avisa_que_chama_nele_e_pede_so_o_nome() -> None:
         assert args, "não anotou o contato"
         assert session.current_agent.ligacao.contato["telefone"] == "17998765432"
         assert session.current_agent.ligacao.contato["nome"].startswith("Lucca")
+        # a mensagem do WhatsApp pede a foto "da janela do quarto": o cômodo tem que vir anotado
+        assert [a.lower() for a in session.current_agent.ligacao.contato["ambientes"]] == ["quarto"]
 
 
 def _historico_com_contato_anotado():

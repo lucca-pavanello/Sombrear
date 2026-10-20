@@ -21,6 +21,7 @@ export type Ligacao = {
   assunto?: Assunto | null
   resumo?: string | null
   orcamento?: Orcamento | null
+  ambientes?: string[] | null  // cômodos que o cliente citou ("sala", "quarto")
   transcricao?: Fala[]
 }
 
@@ -116,7 +117,12 @@ export async function registrar(lig: Ligacao, db: Db, pedir: Pedir, agora: () =>
     const conv = await conversaDoCliente(pedir, {
       numero, identificador, nome: base.nome, conversaConhecida: Number(lead.id_conversa_chatwoot) || null,
     })
-    const mensagens = assumiu ? [] : mensagensCliente({ nome: base.nome, assunto, resumo, orcamento: lig.orcamento })
+    const ambientes = Array.isArray(lig.ambientes)
+      ? lig.ambientes.filter(a => typeof a === 'string' && a.trim() && a.length <= 30).slice(0, 4)
+      : []
+    const mensagens = assumiu ? [] : mensagensCliente({
+      nome: base.nome, assunto, resumo, orcamento: lig.orcamento, ambientes, quando: lig.fim ?? lig.inicio,
+    })
     for (const [i, m] of mensagens.entries()) {
       if (i > 0) await pausa(PAUSA_ENTRE_MENSAGENS_MS)
       await enviarAoCliente(pedir, conv.conversaId, m)

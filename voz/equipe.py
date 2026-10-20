@@ -483,17 +483,20 @@ class AmandaCliente(AmandaEquipe):
 
     @function_tool()
     async def anotar_contato(self, context: RunContext, nome: str, telefone: str,
-                             assunto: Literal["orcamento", "duvida", "outro"], resumo: str) -> str:
+                             assunto: Literal["orcamento", "duvida", "outro"], resumo: str,
+                             ambientes: list[str]) -> str:
         """Anota o contato para o time chamar no WhatsApp. telefone com DDD, só números (17991234567),
         ou vazio se o cliente aceitou ser chamado no número de onde ligou.
-        resumo: o que o cliente quer em uma ou duas frases (modelo, medidas, valor passado, foto pendente)."""
+        resumo: o que o cliente quer em uma ou duas frases (modelo, medidas, valor passado, foto pendente).
+        ambientes: os cômodos que o cliente citou, só o nome (["sala"], ["quarto", "sala"]); [] se não falou.
+        A mensagem do WhatsApp pede a foto da janela desses cômodos."""
         numeros = so_digitos(telefone) or so_digitos(self.ligacao.telefone_linha)
         if len(numeros) in (12, 13) and numeros.startswith("55"):
             numeros = numeros[2:]
         if len(numeros) not in (10, 11):
             raise ToolError("Telefone incompleto: peça o número com DDD de novo.")
         # vai para o Dash quando a ligação terminar (ligacao.enviar): lead no CRM e mensagem no WhatsApp
-        self.ligacao.anotar(nome, numeros, assunto, resumo)
+        self.ligacao.anotar(nome, numeros, assunto, resumo, ambientes)
         return "anotado"
 
     @function_tool()
