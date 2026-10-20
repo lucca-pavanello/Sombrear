@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover
 
 from agenda import FUSO
 from frases import TrechosCurtos
-from ligacao import Ligacao, enviar, so_digitos
+from ligacao import Ligacao, enviar, enviar_audio, so_digitos
 from reacao import TODAS as REACOES, Reacoes, grupo, sem_reacao
 from sem_silencio import (FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia,
                           ESPERA, ESPERA_DEPOIS_DA_CONTA, com_espera, fala_calcular, sem_anuncio)
@@ -622,6 +622,7 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
 
     async def _no_fim() -> None:
         await _uma_vez()
+        await _audio_uma_vez()
 
     ctx.add_shutdown_callback(_no_fim)
 
@@ -629,6 +630,7 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
         # manda antes de fechar: no console o processo pode acabar junto com a sessão
         await _uma_vez()
         await session.aclose()
+        await _audio_uma_vez()
         try:  # numa linha de verdade, apagar a sala derruba a chamada; no console a sala é de mentira
             await ctx.delete_room()
         except Exception:  # noqa: BLE001
@@ -636,6 +638,25 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
         ctx.shutdown("ligação encerrada")
 
     agente._ao_desligar = _desligar_de_verdade
+
+    # a gravação (audio.ogg do LiveKit) só fecha com a sessão: sobe depois dela, uma vez só
+    audio: list[asyncio.Future] = []
+
+    async def _subir_audio() -> None:
+        await session.aclose()  # fecha o arquivo; repetir não faz mal
+        arq = ctx.session_directory / "audio.ogg"
+        if os.environ.get("DESLIGAR_ARQUIVO"):  # teste no PC: fica ao lado da conversa, para ouvir
+            salvar_audio(lig, arq)
+        await _uma_vez()  # a linha da ligação tem que existir no Dash antes do áudio
+        resultado = await enviar_audio(lig, arq)
+        print(f"áudio da ligação {lig.ref}: {resultado}", flush=True)
+
+    def _audio_uma_vez() -> asyncio.Future:
+        if not audio:
+            audio.append(asyncio.ensure_future(_subir_audio()))
+        return audio[0]
+
+    session.on("close", lambda _ev: _audio_uma_vez())
 
     async def _encerrar_pelo_codigo(fala: str, motivo: str) -> None:
         if lig.encerramento:
@@ -710,6 +731,19 @@ ENVIOS = RECADOS.parent / "ligacoes.log"
 CONVERSAS = RECADOS.parent / "conversas"
 
 
+def salvar_audio(lig: Ligacao, arq: Path) -> Path | None:
+    """A gravação da ligação de teste ao lado da conversa, com o mesmo nome (.ogg)."""
+    try:
+        if not arq.exists():
+            return None
+        CONVERSAS.mkdir(parents=True, exist_ok=True)
+        destino = CONVERSAS / f"{lig.inicio:%Y-%m-%d_%H%M}_{lig.ref[-8:]}.ogg"
+        destino.write_bytes(arq.read_bytes())
+        return destino
+    except OSError:
+        return None
+
+
 def salvar_conversa(lig: Ligacao) -> Path | None:
     """A ligação de teste inteira em texto, para o Lucca revisar e pedir ajustes."""
     try:
@@ -752,7 +786,11 @@ async def conversar(ctx: agents.JobContext) -> None:
     agora = datetime.now(FUSO)
     session = criar_sessao()
     agente = AmandaCliente(agora) if PUBLICO == "cliente" else AmandaEquipe(agora)
-    await session.start(room=ctx.room, agent=agente)
+    # grava o áudio da ligação de cliente (sobe para o Dash no fim, aba Agente IA > Ligações);
+    # GRAVAR=0 desliga. Só o áudio: o resto (traces, logs) não serve para a loja
+    gravar = isinstance(agente, AmandaCliente) and os.environ.get("GRAVAR", "1") == "1"
+    await session.start(room=ctx.room, agent=agente,
+                        record={"audio": True, "traces": False, "logs": False, "transcript": False} if gravar else False)
     if isinstance(agente, AmandaCliente):
         acompanhar_ligacao(ctx, session, agente)
     Vigia(session)
