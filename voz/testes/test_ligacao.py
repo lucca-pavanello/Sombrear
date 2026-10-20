@@ -171,7 +171,8 @@ def test_nao_encerra_com_pergunta_do_cliente_no_ar() -> None:
 
 def test_reconhece_so_despedida() -> None:
     from equipe import e_despedida
-    for t in ["Obrigado, tchau!", "Tá bom, obrigada.", "Valeu, até mais", "Beleza, combinado.", "Tchau tchau"]:
+    for t in ["Obrigado, tchau!", "Tá bom, obrigada.", "Valeu, até mais", "Beleza, combinado.", "Tchau tchau",
+              "Eu que agradeço.", "Imagina!", "Por nada."]:
         assert e_despedida(t), t
     for t in ["Ah, espera, e a instalação?", "Obrigado, mas quanto fica?", "Não, peraí", "Esqueci de falar uma coisa",
               "", "Quero também pro quarto"]:

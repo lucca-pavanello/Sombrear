@@ -228,8 +228,8 @@ despedida é dita por ela, então NÃO fale a despedida antes de chamar.
 - Nunca encerre no meio de uma pergunta do cliente, nem antes de anotar o contato quando ele quis
   ser chamado. Se ele perguntou algo, responda e espere: só encerre num turno em que ele não
   perguntou nada. Depois de se despedir, não puxe assunto novo.
-- Depois de encerrar_ligacao você não fala mais nada: o cliente ainda pode responder "obrigado,
-  tchau" e a linha cai sozinha uns segundos depois, como numa ligação de verdade.
+- Depois de encerrar_ligacao você fica em silêncio. Não responda ao agradecimento e não explique
+  nada sobre a ligação ou sobre desligar.
 
 # Orçamento
 {CALCULADORA}- Pagamento: 4x sem juros no cartão ou 5% à vista (já vem no fale_assim). Prazo, só se
@@ -715,7 +715,8 @@ ESPERA_TCHAU = float(os.environ.get("ESPERA_TCHAU") or 3)
 ESPERA_SEM_RESPOSTA = float(os.environ.get("ESPERA_SEM_RESPOSTA") or 5)
 _TCHAU = re.compile(r"\b(tchau|obrigad[oa]|brigad[oa]|valeu|vlw|até|falou|beleza|tá bom|ta bom|ok|okay|"
                     r"de nada|igualmente|combinado|joia|jóia|fechou|fechado|certo|perfeito|isso|abraço|"
-                    r"bom dia|boa tarde|boa noite|tenha um|pra você também|pra vc também)\b", re.IGNORECASE)
+                    r"bom dia|boa tarde|boa noite|tenha um|pra você também|pra vc também|agradeç\w*|agradec\w*|eu que|"
+                    r"imagina|disponha|por nada|nada não|tudo certo|tá certo|ta certo)\b", re.IGNORECASE)
 _ASSUNTO_NOVO = re.compile(r"\b(espera|peraí|pera aí|mas|outra coisa|pergunta|dúvida|duvida|esqueci|quanto|"
                            r"não|nao)\b", re.IGNORECASE)
 
@@ -736,7 +737,11 @@ def e_despedida(texto: str) -> bool:
     """A resposta do cliente à despedida é só despedida ("obrigado, tchau")? Pergunta ou assunto novo
     não é: aí a ligação continua."""
     t = texto.strip()
-    return bool(t) and "?" not in t and bool(_TCHAU.search(t)) and not _ASSUNTO_NOVO.search(t)
+    if not t or termina_em_pergunta(t) or _ASSUNTO_NOVO.search(t):
+        return False
+    # "Eu que agradeço." não estava na lista e virou assunto novo (teste de 20/10): ela respondeu
+    # e a linha não caiu
+    return bool(_TCHAU.search(t))
 
 
 # o que ela diz quando é o código que encerra (silêncio do outro lado ou ligação longa demais)
