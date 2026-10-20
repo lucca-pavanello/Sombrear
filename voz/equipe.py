@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -24,7 +25,7 @@ from dotenv import load_dotenv
 from num2words import num2words
 from livekit import agents
 from livekit.agents import (Agent, AgentServer, AgentSession, APIConnectOptions, ChatContext, ModelSettings,
-                            RunContext, ToolError, function_tool, inference, llm, stt, tts)
+                            RunContext, StopResponse, ToolError, function_tool, inference, llm, stt, tts)
 from livekit.agents.utils import is_given
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.plugins import openai, silero
@@ -153,7 +154,9 @@ São José do Rio Preto, 40 anos de casa. Você está atendendo um CLIENTE numa 
 uma pessoa da loja atende: direta, resolutiva, informal e boa de trato. Nada de call center nem de folheto.
 
 Agora é {DIAS[agora.weekday()]}, {agora:%d/%m/%Y %H:%M}. Você já disse: "{abertura(agora)}"
-Nunca se apresente nem cumprimente de novo.
+Nunca se apresente nem cumprimente de novo. Se o cliente responder só com cumprimento ou "alô?" (ele
+ainda está chegando na ligação), NÃO devolva o "bom dia" nem o "boa tarde": diga que está ali e siga,
+ex.: "Oi, tô aqui. É sobre persiana ou cortina?". Se ele já disse o que quer, vá direto ao assunto.
 
 Se perguntarem se você é robô, IA ou gravação: confirme com naturalidade, "Sou a assistente virtual
 da Sombrear, te atendo por aqui e o que precisar de mais detalhe eu passo pro time". É proibido negar
@@ -181,9 +184,12 @@ O objetivo é levar o atendimento para o WhatsApp, onde o cliente manda foto e r
 escrito. Na ligação você entende o caso e, se ele pedir, já passa o valor.
 
 A) Orçamento ou dúvida de produto (a maioria das ligações):
-1. Entenda o caso: persiana ou cortina, pra qual cômodo, o que incomoda (sol, claridade,
-   privacidade). Se ele já disse, não pergunte de novo. Indique o modelo pela tabela de ambientes e
-   pare: sem lista de benefícios.
+1. Entenda o caso, uma pergunta por vez: persiana ou cortina e pra qual cômodo. Com o cômodo,
+   pergunte se ele já tem modelo: "Você já tem algum modelo em mente?". Se tiver, siga com o modelo
+   dele. Se não tiver ou não souber, pergunte o que incomoda, pra achar o modelo certo: "E o que
+   mais te incomoda lá, pra gente achar o modelo ideal pra você?" (sol, claridade, privacidade).
+   Se ele já disse alguma dessas coisas, não pergunte de novo. Indique o modelo pela tabela de
+   ambientes e pare: sem lista de benefícios.
 2. Ofereça seguir pelo WhatsApp para ele mandar uma foto da janela ou do ambiente: "Consegue me
    mandar uma foto da janela pelo WhatsApp? Aí a gente te passa tudo certinho."
 3. Se ele quiser saber o preço antes (até mesmo de cara, "quanto custa uma persiana?"), peça só o
@@ -222,6 +228,8 @@ despedida é dita por ela, então NÃO fale a despedida antes de chamar.
 - Nunca encerre no meio de uma pergunta do cliente, nem antes de anotar o contato quando ele quis
   ser chamado. Se ele perguntou algo, responda e espere: só encerre num turno em que ele não
   perguntou nada. Depois de se despedir, não puxe assunto novo.
+- Depois de encerrar_ligacao você não fala mais nada: o cliente ainda pode responder "obrigado,
+  tchau" e a linha cai sozinha uns segundos depois, como numa ligação de verdade.
 
 # Orçamento
 {CALCULADORA}- Pagamento: 4x sem juros no cartão ou 5% à vista (já vem no fale_assim). Prazo, só se
@@ -462,6 +470,9 @@ class AmandaCliente(AmandaEquipe):
         self.agora = agora or datetime.now(FUSO)
         self.ligacao = ligacao or Ligacao(inicio=self.agora)
         self._ao_desligar = None  # acompanhar_ligacao liga: manda ao Dash, fecha a sessão e a linha
+        # depois da despedida a linha não cai na hora: espera o "obrigado, tchau" do cliente (Lucca, 20/10)
+        self.motivo_saida: str | None = None
+        self._saida: asyncio.Task | None = None
 
     @staticmethod
     def instrucoes(agora: datetime) -> str:
@@ -510,8 +521,47 @@ class AmandaCliente(AmandaEquipe):
         await context.wait_for_playout()
         handle = context.session.say(despedida.strip() or "Obrigada, tchau!", add_to_chat_ctx=True)
         await handle.wait_for_playout()
-        await self.desligar(motivo)
-        return "ligação encerrada"
+        self._despedir(motivo, ESPERA_SEM_RESPOSTA)
+        return None  # sem resposta do modelo: depois da despedida ela fica quieta
+
+    def _despedir(self, motivo: str, espera: float) -> None:
+        """Marca a despedida e (re)começa a contagem até a linha cair."""
+        self.motivo_saida = motivo
+        if self._saida:
+            self._saida.cancel()
+        self._saida = asyncio.create_task(self._desligar_em(espera))
+
+    def _voltar_a_conversar(self) -> None:
+        self.motivo_saida = None
+        if self._saida:
+            self._saida.cancel()
+            self._saida = None
+
+    async def _desligar_em(self, espera: float) -> None:
+        while True:
+            await asyncio.sleep(espera)
+            # ele começou a falar: espera terminar (se a fala virar turno, a contagem recomeça por lá)
+            try:
+                sessao = self.session
+            except RuntimeError:  # testes: agente sem sessão
+                sessao = None
+            if not sessao or sessao.user_state != "speaking":
+                break
+            while sessao.user_state == "speaking":
+                await asyncio.sleep(0.2)
+            espera = ESPERA_TCHAU
+        await self.desligar(self.motivo_saida or "atendimento_concluido")
+
+    async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: llm.ChatMessage) -> None:
+        if self.motivo_saida and not self.ligacao.encerramento:
+            texto = new_message.text_content or ""
+            if e_despedida(texto):
+                # "obrigado, tchau": não responde, só deixa uns segundos e desliga
+                self.ligacao.ouvir("user", texto)  # o turno ignorado não entra na conversa sozinho
+                self._despedir(self.motivo_saida, ESPERA_TCHAU)
+                raise StopResponse()
+            self._voltar_a_conversar()  # trouxe assunto novo ("ah, espera, e a instalação?"): segue a ligação
+        await super().on_user_turn_completed(turn_ctx, new_message)
 
     def _cliente_perguntou(self) -> bool:
         """A última fala do cliente é pergunta? (o Deepgram pontua: "vocês instalam em Mirassol?")"""
@@ -629,6 +679,24 @@ async def _desligar_quando_existir(arq: Path, agente: AmandaCliente) -> None:
     arq.unlink(missing_ok=True)
     print("desligando a ligação de teste", flush=True)
     await agente.desligar("teste")
+
+
+# depois da despedida: segundos de silêncio depois do "tchau" do cliente, e quanto espera se ele não
+# responder nada (Lucca, 20/10: "o cliente responde obrigado, tchau, dá uns 3, 4 segundos e desliga")
+ESPERA_TCHAU = float(os.environ.get("ESPERA_TCHAU") or 3)
+ESPERA_SEM_RESPOSTA = float(os.environ.get("ESPERA_SEM_RESPOSTA") or 5)
+_TCHAU = re.compile(r"\b(tchau|obrigad[oa]|brigad[oa]|valeu|vlw|até|falou|beleza|tá bom|ta bom|ok|okay|"
+                    r"de nada|igualmente|combinado|joia|jóia|fechou|fechado|certo|perfeito|isso|abraço|"
+                    r"bom dia|boa tarde|boa noite|tenha um|pra você também|pra vc também)\b", re.IGNORECASE)
+_ASSUNTO_NOVO = re.compile(r"\b(espera|peraí|pera aí|mas|outra coisa|pergunta|dúvida|duvida|esqueci|quanto|"
+                           r"não|nao)\b", re.IGNORECASE)
+
+
+def e_despedida(texto: str) -> bool:
+    """A resposta do cliente à despedida é só despedida ("obrigado, tchau")? Pergunta ou assunto novo
+    não é: aí a ligação continua."""
+    t = texto.strip()
+    return bool(t) and "?" not in t and bool(_TCHAU.search(t)) and not _ASSUNTO_NOVO.search(t)
 
 
 # o que ela diz quando é o código que encerra (silêncio do outro lado ou ligação longa demais)
