@@ -102,20 +102,20 @@ async def test_se_perguntarem_se_e_robo_confirma() -> None:
                              "uma pessoa e não nega ser IA.")
 
 
-async def test_outro_assunto_pede_nome_completo_e_nao_resolve() -> None:
+async def test_outro_assunto_pede_o_nome_e_nao_resolve() -> None:
     modelo, session = await _sessao()
     async with modelo, session:
         result = await session.run(user_input="Oi, eu comprei uma persiana semana passada e queria saber "
                                               "quando vão instalar.")
         assert not _chamou(result, "anotar_contato")
-        await julgar(result, "Não promete data nem diz que vai verificar a agenda. Pede o nome completo ou o "
+        await julgar(result, "Não promete data nem diz que vai verificar a agenda. Pede o nome ou o "
                              "telefone para passar pro time, uma coisa por vez.")
 
 
 async def test_anota_o_contato_e_diz_que_o_time_chama() -> None:
     modelo, session = await _sessao([
         ("user", "Oi, eu comprei uma persiana semana passada e queria saber quando vão instalar."),
-        ("assistant", "Entendi, vou passar pro time. Qual é o seu nome completo?"),
+        ("assistant", "Entendi, vou passar pro time. Qual é o seu nome?"),
         ("user", "Marcos Antônio Ribeiro."),
         ("assistant", "E o seu telefone com DDD?"),
         ("user", "Dezessete, nove nove um dois três, quatro cinco seis sete."),
@@ -132,19 +132,63 @@ async def test_anota_o_contato_e_diz_que_o_time_chama() -> None:
         await julgar(result, "Diz que o time vai mandar mensagem ou chamar no WhatsApp. Não promete data de instalação.")
 
 
-async def test_ligou_de_um_numero_conhecido_oferece_chamar_nele() -> None:
+async def test_numero_conhecido_avisa_que_chama_nele_e_pede_so_o_nome() -> None:
     modelo, session = await _sessao([
-        ("user", "Oi, eu comprei uma persiana semana passada e queria saber quando vão instalar."),
-        ("assistant", "Entendi, vou passar pro time. Qual é o seu nome completo?"),
+        ("user", "Bom dia, queria uma persiana pro meu quarto."),
+        ("assistant", "Pra quarto a gente costuma indicar a Rolô Blackout. O que te incomoda mais, o sol ou a claridade?"),
+        ("user", "O sol, quero deixar bem escuro."),
+        ("assistant", "Então a Rolô Blackout resolve. Consegue me mandar uma foto da janela pelo WhatsApp?"),
     ])
     async with modelo, session:
         await session.current_agent.conhecer_linha("+5517998765432")
-        result = await session.run(user_input="Marcos Antônio Ribeiro.")
+        result = await session.run(user_input="Consigo mandar, sim.")
         assert not _chamou(result, "anotar_contato")
-        await julgar(result, "Pergunta se pode chamar no WhatsApp no número de onde a pessoa ligou, sem pedir "
-                             "que ela dite o número.")
-        result = await session.run(user_input="Pode sim.")
+        await julgar(result, "Diz que vai chamar ou mandar mensagem no WhatsApp no número de onde a pessoa ligou "
+                             "(afirma, não pergunta se pode) e pede o nome. Não pede o nome completo nem que a "
+                             "pessoa dite o número.")
+        result = await session.run(user_input="Lucca.")
         args = _chamou(result, "anotar_contato")
         assert args, "não anotou o contato"
         assert session.current_agent.ligacao.contato["telefone"] == "17998765432"
-        assert args[-1]["assunto"] == "outro"
+        assert session.current_agent.ligacao.contato["nome"].startswith("Lucca")
+
+
+def _historico_com_contato_anotado():
+    return [
+        ("user", "Oi, eu comprei uma persiana semana passada e queria saber quando vão instalar."),
+        ("assistant", "Entendi, vou passar pro time. Qual é o seu nome?"),
+        ("user", "Marcos."),
+        ("assistant", "E o seu telefone com DDD?"),
+        ("user", "Dezessete, nove nove um dois três, quatro cinco seis sete."),
+        ("assistant", "Pronto, Marcos, anotei. O time vai te mandar mensagem no WhatsApp nesse número, tá?"),
+    ]
+
+
+async def test_cliente_se_despede_ela_desliga() -> None:
+    modelo, session = await _sessao(_historico_com_contato_anotado())
+    async with modelo, session:
+        result = await session.run(user_input="Tá bom, obrigado. Tchau!")
+        assert _chamou(result, "encerrar_ligacao"), "não desligou depois da despedida"
+        assert session.current_agent.ligacao.encerramento in ("cliente_despediu", "atendimento_concluido")
+
+
+async def test_despedidas_em_loop_ela_desliga() -> None:
+    """Duas IAs se despedindo para sempre: ela tem que cortar."""
+    historico = _historico_com_contato_anotado() + [
+        ("user", "Obrigado!"), ("assistant", "Imagina, Marcos!"),
+        ("user", "Obrigado, viu, tchau!"), ("assistant", "Por nada! Qualquer coisa, chama a gente."),
+        ("user", "Obrigado mesmo, tchau tchau!"), ("assistant", "Que isso! Até mais!"),
+    ]
+    modelo, session = await _sessao(historico)
+    async with modelo, session:
+        result = await session.run(user_input="Muito obrigado, tchau, até mais!")
+        assert _chamou(result, "encerrar_ligacao"), "ficou no loop de despedida"
+
+
+async def test_nao_desliga_no_meio_de_uma_pergunta() -> None:
+    modelo, session = await _sessao(_historico_com_contato_anotado())
+    async with modelo, session:
+        result = await session.run(user_input="Ah, e vocês instalam em Mirassol também?")
+        # o que vale é a ligação não cair: se o modelo tentar, a trava do código (pergunta no ar) barra
+        assert session.current_agent.ligacao.encerramento is None, "desligou com o cliente perguntando"
+        await julgar(result, "Responde se instala em Mirassol (sim, instalação em Rio Preto e Mirassol).")

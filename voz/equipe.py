@@ -136,9 +136,11 @@ def abertura(agora: datetime) -> str:
 
 LINHA_CONHECIDA = """
 # O número de quem ligou
-A ligação veio de um número que aparece para você. No passo do telefone, em vez de pedir o número,
-pergunte "Posso te chamar no WhatsApp nesse número que você ligou?". Se ele disser que sim, chame
-anotar_contato com telefone vazio. Se disser que não, peça o número com DDD e confira como sempre.
+A ligação veio de um número que aparece para você. No passo do contato NÃO pergunte se pode chamar
+nesse número e NÃO peça o número: avise que vai chamar nele e peça só o nome, numa fala só:
+"Legal, me passa seu nome que eu te chamo no WhatsApp nesse número que você ligou."
+Com o nome, chame anotar_contato com telefone vazio. Só se o cliente pedir outro número, anote o que
+ele disser, com a conferência.
 """
 
 
@@ -171,8 +173,8 @@ ou dizer que é uma pessoa, e nunca finja estar na loja. Fora isso, não anuncie
   conferências de medida e de telefone abaixo.
 - Nada de lista, emoji ou símbolo: tudo vira fala. Valores e medidas do jeito falado
   ("um metro e vinte por um e quarenta").
-- Você não desliga a ligação, não registra venda, não recebe pagamento e não agenda. O único registro
-  que você faz é anotar_contato; nunca diga que anotou ou que vão chamar sem ela ter dado certo.
+- Você não registra venda, não recebe pagamento e não agenda. O único registro que você faz é
+  anotar_contato; nunca diga que anotou ou que vão chamar sem ela ter dado certo.
 
 # O roteiro da loja
 O objetivo é levar o atendimento para o WhatsApp, onde o cliente manda foto e recebe tudo por
@@ -194,18 +196,32 @@ A) Orçamento ou dúvida de produto (a maioria das ligações):
    Com isso, calcule e fale o valor na própria ligação.
 4. Depois do valor, ofereça mandar por escrito no WhatsApp ("Quer que eu te mande esse orçamento
    no WhatsApp também?").
-5. Para o WhatsApp (foto ou orçamento), peça o nome completo e o telefone com DDD, um de cada vez.
+5. Para o WhatsApp (foto ou orçamento), peça o nome (só o nome, não o completo) e o telefone com
+   DDD, um de cada vez.
    Confira o telefone repetindo os números em grupos ("dezessete, nove nove um dois três, quatro
    cinco seis sete, isso?"). Aí chame anotar_contato e diga que o time vai te chamar no WhatsApp
    nesse número, sem prometer quando (nada de "já já" ou "hoje").
 
 B) Qualquer outro assunto (pedido já feito, entrega, instalação marcada, assistência, falar com
 alguém da loja, fornecedor): não tente resolver e não peça número de pedido, data de compra nem
-outro dado. Entenda em uma frase o que é, peça o nome completo e o telefone (com a mesma conferência), chame anotar_contato e diga que vai passar pro time e que
-eles mandam mensagem no WhatsApp.
+outro dado. Entenda em uma frase o que é, peça o nome e depois o telefone, um de cada vez (primeiro
+só o nome; o telefone com a mesma conferência), chame
+anotar_contato e diga que vai passar pro time e que eles mandam mensagem no WhatsApp.
 
 Se anotar_contato falhar, diga que não conseguiu anotar e passe o {CONTATO}, {HORARIO}.
-Despedida curta e calorosa quando ele encerrar.
+
+# Encerrar a ligação
+Você desliga quando o atendimento acabou, como uma pessoa da loja faria. Chame encerrar_ligacao com
+a despedida (curta e calorosa, ex.: "Combinado, já te chamo no WhatsApp. Obrigada, tchau!"); a
+despedida é dita por ela, então NÃO fale a despedida antes de chamar.
+- Contato anotado e confirmado, e o cliente não pediu mais nada: encerre.
+- O cliente se despediu ou disse que é só isso: encerre.
+- A conversa não anda: ele repete as mesmas coisas, fica só trocando "obrigado" e "tchau", parece
+  uma gravação ou outro robô, ou insiste em assunto fora da loja depois de você desviar uma vez:
+  encerre com educação.
+- Nunca encerre no meio de uma pergunta do cliente, nem antes de anotar o contato quando ele quis
+  ser chamado. Se ele perguntou algo, responda e espere: só encerre num turno em que ele não
+  perguntou nada. Depois de se despedir, não puxe assunto novo.
 
 # Orçamento
 {CALCULADORA}- Pagamento: 4x sem juros no cartão ou 5% à vista (já vem no fale_assim). Prazo, só se
@@ -445,6 +461,7 @@ class AmandaCliente(AmandaEquipe):
         super().__init__(agora, chat_ctx)
         self.agora = agora or datetime.now(FUSO)
         self.ligacao = ligacao or Ligacao(inicio=self.agora)
+        self._ao_desligar = None  # acompanhar_ligacao liga: manda ao Dash, fecha a sessão e a linha
 
     @staticmethod
     def instrucoes(agora: datetime) -> str:
@@ -465,7 +482,7 @@ class AmandaCliente(AmandaEquipe):
         self.ligacao.orcou(r, modelo, quantidade)
 
     @function_tool()
-    async def anotar_contato(self, context: RunContext, nome_completo: str, telefone: str,
+    async def anotar_contato(self, context: RunContext, nome: str, telefone: str,
                              assunto: Literal["orcamento", "duvida", "outro"], resumo: str) -> str:
         """Anota o contato para o time chamar no WhatsApp. telefone com DDD, só números (17991234567),
         ou vazio se o cliente aceitou ser chamado no número de onde ligou.
@@ -476,8 +493,38 @@ class AmandaCliente(AmandaEquipe):
         if len(numeros) not in (10, 11):
             raise ToolError("Telefone incompleto: peça o número com DDD de novo.")
         # vai para o Dash quando a ligação terminar (ligacao.enviar): lead no CRM e mensagem no WhatsApp
-        self.ligacao.anotar(nome_completo, numeros, assunto, resumo)
+        self.ligacao.anotar(nome, numeros, assunto, resumo)
         return "anotado"
+
+    @function_tool()
+    async def encerrar_ligacao(self, context: RunContext, despedida: str,
+                               motivo: Literal["atendimento_concluido", "cliente_despediu",
+                                               "conversa_sem_avanco", "fora_do_assunto"]) -> str:
+        """Diz a despedida e desliga. Use quando o atendimento acabou, o cliente se despediu ou a
+        conversa não anda (repetição, só despedidas, gravação ou outro robô)."""
+        if self._cliente_perguntou():
+            raise ToolError("O cliente acabou de fazer uma pergunta: responda e espere, não encerre agora.")
+        await context.wait_for_playout()
+        handle = context.session.say(despedida.strip() or "Obrigada, tchau!", add_to_chat_ctx=True)
+        await handle.wait_for_playout()
+        await self.desligar(motivo)
+        return "ligação encerrada"
+
+    def _cliente_perguntou(self) -> bool:
+        """A última fala do cliente é pergunta? (o Deepgram pontua: "vocês instalam em Mirassol?")"""
+        for item in reversed(self.chat_ctx.items):
+            if getattr(item, "type", None) == "message" and item.role == "user":
+                return "?" in (item.text_content or "")
+        return False
+
+    async def desligar(self, motivo: str) -> None:
+        """Encerra a ligação uma vez só. Quem liga o desligamento de verdade (mandar ao Dash, fechar a
+        sessão, derrubar a linha) é acompanhar_ligacao; sem ele (testes), só registra o motivo."""
+        if self.ligacao.encerramento:
+            return
+        self.ligacao.encerramento = motivo
+        if self._ao_desligar:
+            await self._ao_desligar()
 
 
 def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: AmandaCliente) -> None:
@@ -525,21 +572,67 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
 
     ctx.add_shutdown_callback(_no_fim)
 
-    # teste no PC (console): não há como desligar, então criar este arquivo fecha a sessão como se
+    async def _desligar_de_verdade() -> None:
+        # manda antes de fechar: no console o processo pode acabar junto com a sessão
+        await _uma_vez()
+        await session.aclose()
+        try:  # numa linha de verdade, apagar a sala derruba a chamada; no console a sala é de mentira
+            await ctx.delete_room()
+        except Exception:  # noqa: BLE001
+            pass
+        ctx.shutdown("ligação encerrada")
+
+    agente._ao_desligar = _desligar_de_verdade
+
+    async def _encerrar_pelo_codigo(fala: str, motivo: str) -> None:
+        if lig.encerramento:
+            return
+        handle = session.say(fala, add_to_chat_ctx=True)
+        await handle.wait_for_playout()
+        await agente.desligar(motivo)
+
+    # travas que não dependem do modelo, para a ligação nunca ficar aberta (ex.: duas IAs se
+    # despedindo para sempre): silêncio do outro lado e tempo máximo
+    silencios = [0]
+
+    @session.on("user_state_changed")
+    def _ausente(ev) -> None:
+        if ev.new_state == "speaking":
+            silencios[0] = 0
+        if ev.new_state != "away" or lig.encerramento:
+            return
+        silencios[0] += 1
+        if silencios[0] == 1:
+            session.say(FALA_AINDA_AI, add_to_chat_ctx=True)
+        else:
+            asyncio.create_task(_encerrar_pelo_codigo(FALA_DESLIGA_SILENCIO, "silencio"))
+
+    async def _tempo_maximo() -> None:
+        await asyncio.sleep(LIGACAO_MAX_MIN * 60)
+        await _encerrar_pelo_codigo(FALA_DESLIGA_TEMPO, "tempo_maximo")
+
+    asyncio.create_task(_tempo_maximo())
+
+    # teste no PC (console): não há como desligar, então criar este arquivo encerra a ligação como se
     # o cliente tivesse desligado (ligar.ps1 -Modo console define DESLIGAR_ARQUIVO)
     if arq := os.environ.get("DESLIGAR_ARQUIVO"):
-        asyncio.create_task(_desligar_quando_existir(Path(arq), session, _uma_vez))
+        asyncio.create_task(_desligar_quando_existir(Path(arq), agente))
 
 
-async def _desligar_quando_existir(arq: Path, session: AgentSession, mandar) -> None:
+async def _desligar_quando_existir(arq: Path, agente: AmandaCliente) -> None:
     arq.unlink(missing_ok=True)
     while not arq.exists():
         await asyncio.sleep(0.5)
     arq.unlink(missing_ok=True)
     print("desligando a ligação de teste", flush=True)
-    # no console o processo pode acabar junto com a sessão: manda antes de fechar
-    await mandar()
-    await session.aclose()
+    await agente.desligar("teste")
+
+
+# o que ela diz quando é o código que encerra (silêncio do outro lado ou ligação longa demais)
+FALA_AINDA_AI = "Oi, você ainda está aí?"
+FALA_DESLIGA_SILENCIO = "Vou desligar então. Qualquer coisa, chama a gente no WhatsApp. Tchau!"
+FALA_DESLIGA_TEMPO = "Preciso encerrar por aqui. O time continua com você pelo WhatsApp. Obrigada, tchau!"
+LIGACAO_MAX_MIN = float(os.environ.get("LIGACAO_MAX_MIN") or 10)
 
 
 ENVIOS = RECADOS.parent / "ligacoes.log"
@@ -571,7 +664,8 @@ def registrar_envio(lig: Ligacao, resultado: str) -> None:
         with ENVIOS.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"quando": datetime.now(FUSO).isoformat(timespec="seconds"), "ref": lig.ref,
                                 "resultado": resultado, "falas_cliente": sum(x["quem"] == "cliente" for x in lig.falas),
-                                "anotou_contato": lig.contato is not None}, ensure_ascii=False) + "\n")
+                                "anotou_contato": lig.contato is not None,
+                                "encerramento": lig.encerramento}, ensure_ascii=False) + "\n")
     except OSError:
         pass
 

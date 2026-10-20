@@ -141,3 +141,29 @@ def test_salva_a_conversa_de_teste(tmp_path, monkeypatch) -> None:
     assert "Amanda: Boa tarde, Amanda da Sombrear Decor aqui." in texto
     assert "Cliente: Quanto fica uma rolô de dois por dois?" in texto
     assert "Juliana Prado" in texto
+
+
+async def test_desligar_acontece_uma_vez_so() -> None:
+    from equipe import AmandaCliente
+    agente = AmandaCliente(INICIO)
+    chamadas = []
+
+    async def ao_desligar() -> None:
+        chamadas.append(1)
+
+    agente._ao_desligar = ao_desligar
+    await agente.desligar("cliente_despediu")
+    await agente.desligar("silencio")
+    assert chamadas == [1]
+    assert agente.ligacao.encerramento == "cliente_despediu"
+
+
+def test_nao_encerra_com_pergunta_do_cliente_no_ar() -> None:
+    from livekit.agents import llm as lk_llm
+    from equipe import AmandaCliente
+    ctx = lk_llm.ChatContext()
+    ctx.add_message(role="user", content="Vocês instalam em Mirassol também?")
+    assert AmandaCliente(INICIO, chat_ctx=ctx)._cliente_perguntou()
+    ctx2 = lk_llm.ChatContext()
+    ctx2.add_message(role="user", content="Tá bom, obrigado. Tchau!")
+    assert not AmandaCliente(INICIO, chat_ctx=ctx2)._cliente_perguntou()
