@@ -60,20 +60,43 @@ export function blocoOrcamento(o: Orcamento, nome: string | null): string {
   return linhas.join('\n')
 }
 
-/** Como alguém da loja escreveria: a primeira cumprimenta e lembra da ligação, a segunda segue o
- * assunto. No máximo uma pergunta por mensagem (regra da loja). */
-export function mensagensCliente(p: { nome: string | null; assunto: Assunto; resumo: string; orcamento?: Orcamento | null }): string[] {
-  const primeiro = primeiroNome(p.nome)
-  const primeira = primeiro
-    ? `Oi, ${primeiro}, tudo bem? Aqui é da Sombrear, a gente se falou agora há pouco por telefone 😊`
-    : 'Oi! Aqui é da Sombrear, a gente se falou agora há pouco por telefone 😊 Com quem eu falo?'
+/** "Bom dia" / "Boa tarde" / "Boa noite" pelo horário de São Paulo */
+export function saudacao(iso: string): string {
+  const h = Number(new Date(iso).toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false })) % 24
+  return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'
+}
+
+// cômodos que pedem "da"; o resto vai com "do" (quarto, escritório, banheiro, closet...)
+const FEMININO = new Set(['sala', 'cozinha', 'varanda', 'sacada', 'suíte', 'suite', 'área', 'area', 'lavanderia',
+  'copa', 'edícula', 'loja', 'recepção', 'academia', 'brinquedoteca', 'biblioteca', 'porta', 'janela'])
+
+/** "da janela da sala", "das janelas do quarto e da sala"; só "da janela" quando ele não disse o cômodo */
+export function janelaDe(ambientes?: string[] | null): string {
+  const nomes = (ambientes ?? []).map(a => String(a).trim().toLowerCase().replace(/^(o|a|os|as)\s+/, '')).filter(Boolean)
+  if (!nomes.length) return 'da janela'
+  const com = nomes.map(n => (FEMININO.has(n.split(/\s+/)[0]) ? 'da ' : 'do ') + n)
+  const lista = com.length === 1 ? com[0] : `${com.slice(0, -1).join(', ')} e ${com[com.length - 1]}`
+  return `${com.length === 1 ? 'da janela' : 'das janelas'} ${lista}`
+}
+
+/** No tom da Amanda do WhatsApp (prompt do n8n): mensagens curtas, uma ideia por mensagem, sem emoji.
+ * 1) cumprimenta e lembra da ligação; 2) confere o nome (a voz não sabe a grafia: Stella ou Estela?);
+ * 3) segue o assunto, citando o cômodo que ele falou, para ver que a gente prestou atenção. */
+export function mensagensCliente(p: {
+  nome: string | null; assunto: Assunto; resumo: string; orcamento?: Orcamento | null
+  ambientes?: string[] | null; quando: string
+}): string[] {
+  // o nome não vai no "oi": a voz pode ter entendido errado, então ele só aparece na pergunta que confere
+  const oi = `${saudacao(p.quando)}, tudo bem? Aqui é da Sombrear. A gente acabou de se falar por telefone.`
+  const nome = p.nome?.trim() ? `Anotei seu nome como ${p.nome.trim()}, está correto?` : 'Qual o seu nome?'
   if (p.assunto === 'outro') {
-    return [primeira, 'Já passei seu recado pro pessoal da loja. Eles te respondem por aqui mesmo.']
+    return [oi, nome, 'Já passei seu recado pro pessoal da loja, eles te respondem por aqui mesmo.']
   }
-  const segunda = p.orcamento
-    ? `Te mando aqui o valor que passei na ligação:\n\n${blocoOrcamento(p.orcamento, p.nome)}\n\nSe puder, me manda uma foto da janela que eu confiro as medidas certinho.`
-    : 'Me manda uma foto da janela por aqui que eu já vejo tudo certinho pra você.'
-  return [primeira, segunda]
+  const foto = janelaDe(p.ambientes)
+  const segue = p.orcamento
+    ? `Te mando aqui o valor que passei na ligação:\n\n${blocoOrcamento(p.orcamento, p.nome)}\n\nSe puder, me manda uma foto ${foto} que eu confiro as medidas.`
+    : `E me manda uma foto ${foto} por aqui, que eu já te passo tudo certinho.`
+  return [oi, nome, segue]
 }
 
 const ROTULO_ASSUNTO: Record<Assunto, string> = { orcamento: 'orçamento', duvida: 'dúvida', outro: 'outro assunto' }

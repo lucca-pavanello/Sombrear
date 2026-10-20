@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { conversaDoCliente, etiquetar, type Pedir } from '../../../supabase/functions/registrar-ligacao/chatwoot'
-import { blocoOrcamento, mensagensCliente, notaEquipe, primeiroNome } from '../../../supabase/functions/registrar-ligacao/mensagem'
+import { blocoOrcamento, janelaDe, mensagensCliente, notaEquipe, primeiroNome, saudacao } from '../../../supabase/functions/registrar-ligacao/mensagem'
 import {
   equipeAssumiu, normalizarTelefone, registrar, type Db, type Lead, type Ligacao, type StatusWhatsapp,
 } from '../../../supabase/functions/registrar-ligacao/registrar'
@@ -16,7 +16,7 @@ const LIG: Ligacao = {
   ref: 'lig-1', inicio: '2026-10-20T13:40:00Z', fim: '2026-10-20T13:43:10Z',
   telefone_chamador: '+55 17 99876-5432', telefone: '17998765432', nome: 'Juliana Prado Souza',
   assunto: 'orcamento', resumo: 'Rolô blackout pra sala, 2 x 2 do vão; vai mandar foto da janela.',
-  orcamento: ORC,
+  orcamento: ORC, ambientes: ['sala'],
   transcricao: [{ quem: 'amanda', texto: 'Boa tarde, Amanda da Sombrear Decor aqui.' }, { quem: 'cliente', texto: 'Queria uma persiana.' }],
 }
 
@@ -119,33 +119,62 @@ describe('telefone e nome', () => {
 })
 
 describe('textos', () => {
-  it('orçamento: cumprimenta pelo primeiro nome numa mensagem e manda valor + pedido de foto na outra', () => {
-    const [a, b] = mensagensCliente({ nome: 'Juliana Prado Souza', assunto: 'orcamento', resumo: 'x', orcamento: ORC })
-    expect(a).toBe('Oi, Juliana, tudo bem? Aqui é da Sombrear, a gente se falou agora há pouco por telefone 😊')
-    expect(b).toContain('• 01 Rolô BK Branco 2,00 x 2,00')
-    expect(b).toContain('a partir de R$ 931,00 em até 4x, ou R$ 884,45 à vista')
-    expect(b).toContain('acréscimo de R$ 85,00')
-    expect(b).toContain('foto da janela')
-    for (const m of [a, b]) expect((m.match(/\?/g) ?? []).length).toBeLessThanOrEqual(1)
+  const Q = '2026-10-20T13:43:10Z'  // 10:43 em São Paulo
+
+  it('orçamento: cumprimenta sem o nome, confere o nome e manda o valor pedindo a foto do cômodo que ele falou', () => {
+    const [a, b, c] = mensagensCliente({ nome: 'Juliana Prado Souza', assunto: 'orcamento', resumo: 'x', orcamento: ORC, ambientes: ['sala'], quando: Q })
+    expect(a).toBe('Bom dia, tudo bem? Aqui é da Sombrear. A gente acabou de se falar por telefone.')
+    expect(b).toBe('Anotei seu nome como Juliana Prado Souza, está correto?')
+    expect(c).toContain('• 01 Rolô BK Branco 2,00 x 2,00')
+    expect(c).toContain('a partir de R$ 931,00 em até 4x, ou R$ 884,45 à vista')
+    expect(c).toContain('acréscimo de R$ 85,00')
+    expect(c).toContain('me manda uma foto da janela da sala que eu confiro as medidas')
+    for (const m of [a, b, c]) expect((m.match(/\?/g) ?? []).length).toBeLessThanOrEqual(1)
   })
 
-  it('sem nome: pergunta com quem fala', () => {
-    const [a] = mensagensCliente({ nome: null, assunto: 'duvida', resumo: 'x' })
-    expect(a).toContain('Com quem eu falo?')
-    expect(a).not.toContain('**')
+  it('sem orçamento: pede a foto citando os cômodos', () => {
+    const [, , c] = mensagensCliente({ nome: 'Estela', assunto: 'orcamento', resumo: 'x', ambientes: ['quarto', 'a sala'], quando: Q })
+    expect(c).toBe('E me manda uma foto das janelas do quarto e da sala por aqui, que eu já te passo tudo certinho.')
+  })
+
+  it('sem emoji em nenhuma mensagem pro cliente', () => {
+    for (const assunto of ['orcamento', 'duvida', 'outro'] as const) {
+      for (const m of mensagensCliente({ nome: 'Estela', assunto, resumo: 'x', ambientes: ['sala'], quando: Q })) {
+        expect(m).not.toMatch(/\p{Extended_Pictographic}/u)
+      }
+    }
+  })
+
+  it('saudação pelo horário de São Paulo', () => {
+    expect(saudacao('2026-10-20T14:59:00Z')).toBe('Bom dia')     // 11:59
+    expect(saudacao('2026-10-20T15:00:00Z')).toBe('Boa tarde')   // 12:00
+    expect(saudacao('2026-10-20T21:30:00Z')).toBe('Boa noite')   // 18:30
+  })
+
+  it('janela: "da" ou "do" pelo cômodo; sem cômodo fica só "da janela"', () => {
+    expect(janelaDe(['Escritório'])).toBe('da janela do escritório')
+    expect(janelaDe(['cozinha', 'quarto', 'varanda'])).toBe('das janelas da cozinha, do quarto e da varanda')
+    expect(janelaDe([])).toBe('da janela')
+    expect(janelaDe(null)).toBe('da janela')
+  })
+
+  it('sem nome: pergunta o nome do jeito da loja', () => {
+    const [a, b] = mensagensCliente({ nome: null, assunto: 'duvida', resumo: 'x', quando: Q })
+    expect(a).toBe('Bom dia, tudo bem? Aqui é da Sombrear. A gente acabou de se falar por telefone.')
+    expect(b).toBe('Qual o seu nome?')
   })
 
   it('outro assunto: avisa que o time responde, sem prometer data', () => {
-    const [, b] = mensagensCliente({ nome: 'Carlos Lima', assunto: 'outro', resumo: 'Quer saber quando vão instalar a persiana que comprou.' })
-    expect(b).toContain('Já passei seu recado pro pessoal da loja')
-    expect(b).toContain('Eles te respondem por aqui')
-    expect(b).not.toContain('Quer saber')  // o resumo é anotação da equipe, não fala pro cliente
-    expect(b).not.toMatch(/hoje|amanhã|já já/i)
+    const [, , c] = mensagensCliente({ nome: 'Carlos Lima', assunto: 'outro', resumo: 'Quer saber quando vão instalar a persiana que comprou.', quando: Q })
+    expect(c).toContain('Já passei seu recado pro pessoal da loja')
+    expect(c).toContain('eles te respondem por aqui')
+    expect(c).not.toContain('Quer saber')  // o resumo é anotação da equipe, não fala pro cliente
+    expect(c).not.toMatch(/hoje|amanhã|já já/i)
   })
 
   it('sem travessão em nenhum texto', () => {
     const textos = [
-      ...mensagensCliente({ nome: 'A B', assunto: 'orcamento', resumo: 'x', orcamento: ORC }),
+      ...mensagensCliente({ nome: 'A B', assunto: 'orcamento', resumo: 'x', orcamento: ORC, ambientes: ['sala'], quando: LIG.inicio }),
       notaEquipe({ inicio: LIG.inicio, fim: LIG.fim, nome: 'A', telefone: '5517', telefoneChamador: null, assunto: 'outro', resumo: 'x', orcamento: ORC, transcricao: LIG.transcricao!, equipeAssumiu: false }),
       blocoOrcamento({ ...ORC, instalacao: 'sob_consulta' }, null),
     ]
@@ -162,7 +191,7 @@ describe('textos', () => {
 })
 
 describe('registrar: ordem das mensagens', () => {
-  it('espera entre uma mensagem e outra, para o "oi" chegar antes da foto', async () => {
+  it('espera entre uma mensagem e outra, para chegarem na ordem', async () => {
     const b = bancoFalso(); const c = chatwootFalso()
     const eventos: string[] = []
     const pedir: Pedir = async (metodo, caminho, corpo) => {
@@ -172,12 +201,12 @@ describe('registrar: ordem das mensagens', () => {
       return c.pedir(metodo, caminho, corpo)
     }
     await registrar(LIG, b.db, pedir, AGORA, async ms => { eventos.push('pausa:' + ms) })
-    expect(eventos).toEqual(['msg:Oi,', 'pausa:3000', 'msg:Te '])
+    expect(eventos).toEqual(['msg:Bom', 'pausa:3000', 'msg:Ano', 'pausa:3000', 'msg:Te '])
   })
 })
 
 describe('registrar: cliente novo', () => {
-  it('cria lead de origem ligação, contato e conversa no Chatwoot, manda 2 mensagens, nota e etiqueta', async () => {
+  it('cria lead de origem ligação, contato e conversa no Chatwoot, manda 3 mensagens, nota e etiqueta', async () => {
     const b = bancoFalso(); const c = chatwootFalso()
     const r = await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.status).toBe('enviado')
@@ -190,7 +219,7 @@ describe('registrar: cliente novo', () => {
     expect(c.conversas[0]).toMatchObject({ inbox_id: 5, source_id: 'uuid-novo' })
 
     const doCliente = c.mensagens.filter(m => !m.corpo.private)
-    expect(doCliente).toHaveLength(2)
+    expect(doCliente).toHaveLength(3)
     expect(doCliente[0].corpo).toMatchObject({ message_type: 'outgoing', content_attributes: { autor: 'stella_ia', origem: 'ligacao' } })
     expect(c.mensagens.filter(m => m.corpo.private)).toHaveLength(1)
     expect(c.etiquetas.get(r.conversa!)).toEqual(['ligacao'])

@@ -151,6 +151,8 @@ async def test_numero_conhecido_avisa_que_chama_nele_e_pede_so_o_nome() -> None:
         assert args, "não anotou o contato"
         assert session.current_agent.ligacao.contato["telefone"] == "17998765432"
         assert session.current_agent.ligacao.contato["nome"].startswith("Lucca")
+        # a mensagem do WhatsApp pede a foto "da janela do quarto": o cômodo tem que vir anotado
+        assert [a.lower() for a in session.current_agent.ligacao.contato["ambientes"]] == ["quarto"]
 
 
 def _historico_com_contato_anotado():
@@ -169,7 +171,8 @@ async def test_cliente_se_despede_ela_desliga() -> None:
     async with modelo, session:
         result = await session.run(user_input="Tá bom, obrigado. Tchau!")
         assert _chamou(result, "encerrar_ligacao"), "não desligou depois da despedida"
-        assert session.current_agent.ligacao.encerramento in ("cliente_despediu", "atendimento_concluido")
+        # a linha cai uns segundos depois (espera o "tchau" de volta); o motivo já fica marcado
+        assert session.current_agent.motivo_saida in ("cliente_despediu", "atendimento_concluido")
 
 
 async def test_despedidas_em_loop_ela_desliga() -> None:
@@ -191,4 +194,27 @@ async def test_nao_desliga_no_meio_de_uma_pergunta() -> None:
         result = await session.run(user_input="Ah, e vocês instalam em Mirassol também?")
         # o que vale é a ligação não cair: se o modelo tentar, a trava do código (pergunta no ar) barra
         assert session.current_agent.ligacao.encerramento is None, "desligou com o cliente perguntando"
+        assert session.current_agent.motivo_saida is None, "se despediu com o cliente perguntando"
         await julgar(result, "Responde se instala em Mirassol (sim, instalação em Rio Preto e Mirassol).")
+
+
+async def test_cliente_chega_com_alo_ela_nao_devolve_o_cumprimento() -> None:
+    modelo, session = await _sessao()
+    async with modelo, session:
+        result = await session.run(user_input="Alô? Oi? Boa tarde.")
+        await julgar(result, "NÃO diz 'boa tarde' nem 'bom dia' de novo (ela já cumprimentou). Diz que está ali "
+                             "e/ou pergunta como ajudar, por exemplo se é persiana ou cortina.")
+
+
+async def test_com_o_comodo_pergunta_se_ja_tem_modelo_em_mente() -> None:
+    modelo, session = await _sessao([
+        ("user", "Queria um orçamento de persiana."),
+        ("assistant", "Pra qual cômodo é?"),
+    ])
+    async with modelo, session:
+        result = await session.run(user_input="Pra sala.")
+        await julgar(result, "Pergunta se a pessoa já tem algum modelo em mente. Não pergunta ainda o que "
+                             "incomoda (sol, claridade) e não indica modelo.")
+        result = await session.run(user_input="Não, não sei qual.")
+        await julgar(result, "Pergunta o que mais incomoda na sala (sol, claridade, privacidade) para achar o "
+                             "modelo ideal. Uma pergunta só.")

@@ -40,7 +40,7 @@ def _ligacao() -> Ligacao:
     lig.ouvir("assistant", "Boa tarde, Amanda da Sombrear Decor aqui. Como posso te ajudar?")
     lig.ouvir("user", "Quanto fica uma rolô de dois por dois?")
     lig.orcou(CONTA, "Rolo", 1)
-    lig.anotar(" Juliana Prado ", "17998765432", "orcamento", " Rolô blackout 2 x 2. ")
+    lig.anotar(" Juliana Prado ", "17998765432", "orcamento", " Rolô blackout 2 x 2. ", [" sala ", ""])
     return lig
 
 
@@ -51,7 +51,7 @@ def test_junta_a_conversa_o_contato_e_o_orcamento() -> None:
     c = lig.corpo()
     assert c["ref"].startswith("voz-") and c["inicio"].startswith("2026-10-20T15:00")
     assert [f["quem"] for f in c["transcricao"]] == ["amanda", "cliente"]
-    assert c["nome"] == "Juliana Prado" and c["telefone"] == "17998765432" and c["resumo"] == "Rolô blackout 2 x 2."
+    assert c["nome"] == "Juliana Prado" and c["telefone"] == "17998765432" and c["resumo"] == "Rolô blackout 2 x 2." and c["ambientes"] == ["sala"]
     assert c["telefone_chamador"] == "+5517998765432"
     assert c["orcamento"] == {"modelo": "Rolo", "tecido": "BK Branco", "largura": 2.0, "altura": 2.0, "quantidade": 1,
                               "total4x": 931.0, "totalAvista": 884.45, "instalacao": 85.0, "maisBarato": True}
@@ -167,3 +167,50 @@ def test_nao_encerra_com_pergunta_do_cliente_no_ar() -> None:
     ctx2 = lk_llm.ChatContext()
     ctx2.add_message(role="user", content="Tá bom, obrigado. Tchau!")
     assert not AmandaCliente(INICIO, chat_ctx=ctx2)._cliente_perguntou()
+
+
+def test_reconhece_so_despedida() -> None:
+    from equipe import e_despedida
+    for t in ["Obrigado, tchau!", "Tá bom, obrigada.", "Valeu, até mais", "Beleza, combinado.", "Tchau tchau"]:
+        assert e_despedida(t), t
+    for t in ["Ah, espera, e a instalação?", "Obrigado, mas quanto fica?", "Não, peraí", "Esqueci de falar uma coisa",
+              "", "Quero também pro quarto"]:
+        assert not e_despedida(t), t
+
+
+class _Msg:
+    def __init__(self, texto: str) -> None:
+        self.text_content = texto
+
+
+async def test_depois_da_despedida_espera_o_tchau_e_desliga(monkeypatch) -> None:
+    import asyncio
+
+    import equipe
+    from livekit.agents import StopResponse
+    monkeypatch.setattr(equipe, "ESPERA_TCHAU", 0.05)
+    agente = equipe.AmandaCliente(INICIO)
+    agente._despedir("atendimento_concluido", 10)  # despediu; sem resposta, cairia em 10 s
+    assert agente.ligacao.encerramento is None
+    try:
+        await agente.on_user_turn_completed(None, _Msg("Obrigado, tchau!"))
+        raise AssertionError("respondeu ao tchau")
+    except StopResponse:
+        pass
+    assert agente.ligacao.encerramento is None  # ainda não: dá uns segundos
+    await asyncio.sleep(0.2)
+    assert agente.ligacao.encerramento == "atendimento_concluido"
+    assert agente.ligacao.falas[-1] == {"quem": "cliente", "texto": "Obrigado, tchau!"} or \
+        agente.ligacao.falas[-1]["texto"] == "Obrigado, tchau!"
+
+
+async def test_assunto_novo_depois_da_despedida_continua_a_ligacao(monkeypatch) -> None:
+    import asyncio
+
+    import equipe
+    monkeypatch.setattr(equipe, "REACAO", False)
+    agente = equipe.AmandaCliente(INICIO)
+    agente._despedir("atendimento_concluido", 0.05)
+    await agente.on_user_turn_completed(None, _Msg("Ah, espera, vocês instalam em Mirassol?"))
+    await asyncio.sleep(0.2)
+    assert agente.ligacao.encerramento is None and agente.motivo_saida is None
