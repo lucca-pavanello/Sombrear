@@ -564,10 +564,12 @@ class AmandaCliente(AmandaEquipe):
         await super().on_user_turn_completed(turn_ctx, new_message)
 
     def _cliente_perguntou(self) -> bool:
-        """A última fala do cliente é pergunta? (o Deepgram pontua: "vocês instalam em Mirassol?")"""
+        """A última fala do cliente termina em pergunta? (o Deepgram pontua: "vocês instalam em
+        Mirassol?"). Só o fim conta: "Meu nome é Luca, tá? Muito obrigado." não é pergunta, e o "?"
+        no meio travava o desligar (teste de 20/10: ela deu tchau e a linha ficou aberta)."""
         for item in reversed(self.chat_ctx.items):
             if getattr(item, "type", None) == "message" and item.role == "user":
-                return "?" in (item.text_content or "")
+                return termina_em_pergunta(item.text_content or "")
         return False
 
     async def desligar(self, motivo: str) -> None:
@@ -588,6 +590,11 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
     def _guardar(ev) -> None:
         if getattr(ev.item, "type", None) == "message":
             lig.ouvir(ev.item.role, ev.item.text_content)
+            # ela disse tchau sem chamar encerrar_ligacao: a linha cai do mesmo jeito, depois da espera
+            # (teste de 20/10: deu tchau, não desligou e 15 s depois perguntou "você ainda está aí?")
+            if (ev.item.role == "assistant" and not agente.motivo_saida and not lig.encerramento
+                    and ela_se_despediu(ev.item.text_content or "")):
+                agente._despedir("atendimento_concluido", ESPERA_SEM_RESPOSTA)
 
     def _linha(p) -> None:
         # ligação de telefone (SIP): o LiveKit traz o número do cliente nesse atributo
@@ -711,6 +718,18 @@ _TCHAU = re.compile(r"\b(tchau|obrigad[oa]|brigad[oa]|valeu|vlw|até|falou|belez
                     r"bom dia|boa tarde|boa noite|tenha um|pra você também|pra vc também)\b", re.IGNORECASE)
 _ASSUNTO_NOVO = re.compile(r"\b(espera|peraí|pera aí|mas|outra coisa|pergunta|dúvida|duvida|esqueci|quanto|"
                            r"não|nao)\b", re.IGNORECASE)
+
+
+def termina_em_pergunta(texto: str) -> bool:
+    return texto.strip().rstrip(" .!…").endswith("?")
+
+
+_TCHAU_DELA = re.compile(r"\b(tchau|até mais|até logo)\b", re.IGNORECASE)
+
+
+def ela_se_despediu(texto: str) -> bool:
+    """A fala dela é despedida ("Obrigada, tchau!")? Sem pergunta no fim: "tchau?" não conta."""
+    return bool(_TCHAU_DELA.search(texto)) and not termina_em_pergunta(texto)
 
 
 def e_despedida(texto: str) -> bool:

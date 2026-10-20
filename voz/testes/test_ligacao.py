@@ -268,3 +268,27 @@ async def test_ligacao_que_nao_existe_no_dash_nao_fica_repetindo_o_audio(tmp_pat
     finally:
         await parar()
     assert len(pedidos) == 1
+
+
+def test_pergunta_e_so_no_fim_da_fala() -> None:
+    from equipe import termina_em_pergunta
+    assert termina_em_pergunta("Você me chama lá então?")
+    assert termina_em_pergunta("vocês instalam em Mirassol? ")
+    assert not termina_em_pergunta("Beleza. Meu nome é Luca, está? Muito obrigado.")
+    assert not termina_em_pergunta("Estou, tchau.")
+
+
+def test_fala_dela_de_despedida() -> None:
+    from equipe import ela_se_despediu
+    assert ela_se_despediu("Anotado, Luca. O time te chama no WhatsApp nesse número que você ligou. Obrigada, tchau!")
+    assert ela_se_despediu("Combinado. Até mais!")
+    assert not ela_se_despediu("Consegue me mandar uma foto da janela pelo WhatsApp?")
+    assert not ela_se_despediu("Posso te ajudar em mais alguma coisa antes do tchau?")
+
+
+def test_cliente_que_agradece_com_ta_no_meio_nao_trava_o_desligar() -> None:
+    from equipe import AmandaCliente
+    from livekit.agents import ChatContext
+    ctx = ChatContext()
+    ctx.add_message(role="user", content="Beleza. Meu nome é Luca, está? Muito obrigado.")
+    assert not AmandaCliente(INICIO, chat_ctx=ctx)._cliente_perguntou()

@@ -10,3 +10,6 @@ aios_link
 # Claude Code local (skills/hooks/settings da ferramenta)
 .claude/
 supabase/.temp/
+
+# gravações do console do LiveKit (equipe.py console --record)
+voz/console-recordings/
