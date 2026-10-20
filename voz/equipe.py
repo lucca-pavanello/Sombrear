@@ -452,7 +452,11 @@ class AmandaCliente(AmandaEquipe):
 
     async def conhecer_linha(self, numero: str | None) -> None:
         """O número que a linha telefônica informou: ela passa a oferecer chamar nele."""
-        if not so_digitos(numero) or self.ligacao.telefone_linha:
+        # só texto com cara de telefone: no console a sala é de mentira e o atributo vem como
+        # MagicMock (teste de 20/10: virava "telefone incompleto" e quebrava o envio ao Dash)
+        if not isinstance(numero, str) or len(so_digitos(numero)) not in (10, 11, 12, 13):
+            return
+        if self.ligacao.telefone_linha:
             return
         self.ligacao.telefone_linha = numero
         await self.update_instructions(instrucoes_cliente(self.agora, linha_conhecida=True))
@@ -487,7 +491,8 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
 
     def _linha(p) -> None:
         # ligação de telefone (SIP): o LiveKit traz o número do cliente nesse atributo
-        if numero := p.attributes.get("sip.phoneNumber"):
+        numero = getattr(p, "attributes", {}).get("sip.phoneNumber")
+        if isinstance(numero, str) and numero:
             asyncio.create_task(agente.conhecer_linha(numero))
 
     ctx.room.on("participant_connected", _linha)
@@ -498,6 +503,8 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
         asyncio.create_task(agente.conhecer_linha(teste))
 
     async def _mandar_ao_dash() -> None:
+        if os.environ.get("DESLIGAR_ARQUIVO"):  # teste no PC: a conversa fica salva mesmo se o envio falhar
+            salvar_conversa(lig)
         resultado = await enviar(lig)
         print(f"ligação {lig.ref}: {resultado}", flush=True)
         registrar_envio(lig, resultado)
@@ -536,6 +543,24 @@ async def _desligar_quando_existir(arq: Path, session: AgentSession, mandar) -> 
 
 
 ENVIOS = RECADOS.parent / "ligacoes.log"
+CONVERSAS = RECADOS.parent / "conversas"
+
+
+def salvar_conversa(lig: Ligacao) -> Path | None:
+    """A ligação de teste inteira em texto, para o Lucca revisar e pedir ajustes."""
+    try:
+        CONVERSAS.mkdir(parents=True, exist_ok=True)
+        arq = CONVERSAS / f"{lig.inicio:%Y-%m-%d_%H%M}_{lig.ref[-8:]}.txt"
+        linhas = [f"Ligação de teste {lig.inicio:%d/%m/%Y %H:%M} · linha: {lig.telefone_linha or 'não informada'}", ""]
+        linhas += [f"{'Cliente' if f['quem'] == 'cliente' else 'Amanda'}: {f['texto']}" for f in lig.falas]
+        if lig.contato:
+            linhas += ["", f"Contato anotado: {json.dumps(lig.contato, ensure_ascii=False)}"]
+        if lig.orcamento:
+            linhas += [f"Último orçamento: {json.dumps(lig.orcamento, ensure_ascii=False)}"]
+        arq.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+        return arq
+    except OSError:
+        return None
 
 
 def registrar_envio(lig: Ligacao, resultado: str) -> None:

@@ -119,3 +119,25 @@ async def test_cliente_desligou_sem_falar_nao_manda_nada(tmp_path) -> None:
     lig.ouvir("assistant", "Boa tarde, Amanda da Sombrear Decor aqui.")
     assert await enviar(lig, url="http://127.0.0.1:1/", recados=tmp_path / "r.jsonl") == "nada"
     assert not (tmp_path / "r.jsonl").exists()
+
+
+async def test_numero_de_mentira_do_console_nao_vira_telefone() -> None:
+    """No console a sala é falsa e o atributo da linha vem como MagicMock: não pode virar o
+    telefone da ligação (20/10: quebrava o anotar_contato e o envio ao Dash)."""
+    from unittest.mock import MagicMock
+    from equipe import AmandaCliente
+    agente = AmandaCliente(INICIO)
+    await agente.conhecer_linha(MagicMock())
+    await agente.conhecer_linha("123")
+    assert agente.ligacao.telefone_linha is None
+    json.dumps(agente.ligacao.corpo())  # o corpo continua serializável
+
+
+def test_salva_a_conversa_de_teste(tmp_path, monkeypatch) -> None:
+    import equipe
+    monkeypatch.setattr(equipe, "CONVERSAS", tmp_path)
+    arq = equipe.salvar_conversa(_ligacao())
+    texto = arq.read_text(encoding="utf-8")
+    assert "Amanda: Boa tarde, Amanda da Sombrear Decor aqui." in texto
+    assert "Cliente: Quanto fica uma rolô de dois por dois?" in texto
+    assert "Juliana Prado" in texto
