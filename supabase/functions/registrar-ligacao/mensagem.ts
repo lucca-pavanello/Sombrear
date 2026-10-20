@@ -60,20 +60,19 @@ export function blocoOrcamento(o: Orcamento, nome: string | null): string {
   return linhas.join('\n')
 }
 
-/** Uma pergunta por mensagem (regra da loja): a primeira confere o nome, a segunda segue o assunto. */
+/** Como alguém da loja escreveria: a primeira cumprimenta e lembra da ligação, a segunda segue o
+ * assunto. No máximo uma pergunta por mensagem (regra da loja). */
 export function mensagensCliente(p: { nome: string | null; assunto: Assunto; resumo: string; orcamento?: Orcamento | null }): string[] {
   const primeiro = primeiroNome(p.nome)
-  const abre = `Oi${primeiro ? ', ' + primeiro : ''}! Aqui é da Sombrear, a gente se falou agora por telefone 😊`
-  const nome = p.nome?.trim()
-    ? `Peguei seu número pela ligação e anotei seu nome como *${p.nome.trim()}*, tá certinho?`
-    : 'Peguei seu número pela ligação. Com quem eu falo?'
-  const primeira = `${abre}\n${nome}`
+  const primeira = primeiro
+    ? `Oi, ${primeiro}, tudo bem? Aqui é da Sombrear, a gente se falou agora há pouco por telefone 😊`
+    : 'Oi! Aqui é da Sombrear, a gente se falou agora há pouco por telefone 😊 Com quem eu falo?'
   if (p.assunto === 'outro') {
-    return [primeira, `Seu recado já está com o time: ${p.resumo.trim().replace(/\.$/, '')}. Eles te respondem por aqui, tá?`]
+    return [primeira, 'Já passei seu recado pro pessoal da loja. Eles te respondem por aqui mesmo.']
   }
   const segunda = p.orcamento
-    ? `O valor que te passei na ligação:\n\n${blocoOrcamento(p.orcamento, p.nome)}\n\nPode me mandar uma foto da janela por aqui? Aí a gente confere tudo certinho.`
-    : 'Pode me mandar uma foto da janela por aqui? Aí a gente te passa tudo certinho.'
+    ? `Te mando aqui o valor que passei na ligação:\n\n${blocoOrcamento(p.orcamento, p.nome)}\n\nSe puder, me manda uma foto da janela que eu confiro as medidas certinho.`
+    : 'Me manda uma foto da janela por aqui que eu já vejo tudo certinho pra você.'
   return [primeira, segunda]
 }
 
