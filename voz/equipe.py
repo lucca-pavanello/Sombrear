@@ -493,6 +493,9 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
     ctx.room.on("participant_connected", _linha)
     for p in ctx.room.remote_participants.values():
         _linha(p)
+    # teste no PC: simula o número que a linha telefônica informaria (LINHA_TESTE=17996185177)
+    if teste := os.environ.get("LINHA_TESTE"):
+        asyncio.create_task(agente.conhecer_linha(teste))
 
     async def _mandar_ao_dash() -> None:
         resultado = await enviar(lig)
