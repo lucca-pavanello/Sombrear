@@ -75,7 +75,9 @@ try {
     }
     Write-Host "Pronto. Voz: $Voz. Ouvido: $Ouvido. Modo: $Modo. Publico: $Publico (agente sombrear-$Publico)."
     Set-Location $pastaVoz
-    uv run --group local equipe.py $Modo
+    # no console o LiveKit so grava o audio da ligacao com --record (sobe para o Dash e fica em conversas/)
+    if ($Modo -eq "console") { uv run --group local equipe.py console --record }
+    else { uv run --group local equipe.py $Modo }
 }
 finally {
     foreach ($p in $orc, $fala) { if ($p -and -not $p.HasExited) { taskkill /T /F /PID $p.Id | Out-Null } }

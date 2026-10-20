@@ -9,7 +9,7 @@ from datetime import datetime
 from aiohttp import web
 
 from agenda import FUSO
-from ligacao import Ligacao, enviar
+from ligacao import enviar_audio, Ligacao, enviar
 
 INICIO = datetime(2026, 10, 20, 15, 0, tzinfo=FUSO)
 CONTA = {"ok": True, "tecido": "BK Branco", "largura": 2.0, "altura": 2.0, "total4x": 931.0,
@@ -171,7 +171,8 @@ def test_nao_encerra_com_pergunta_do_cliente_no_ar() -> None:
 
 def test_reconhece_so_despedida() -> None:
     from equipe import e_despedida
-    for t in ["Obrigado, tchau!", "Tá bom, obrigada.", "Valeu, até mais", "Beleza, combinado.", "Tchau tchau"]:
+    for t in ["Obrigado, tchau!", "Tá bom, obrigada.", "Valeu, até mais", "Beleza, combinado.", "Tchau tchau",
+              "Eu que agradeço.", "Imagina!", "Por nada."]:
         assert e_despedida(t), t
     for t in ["Ah, espera, e a instalação?", "Obrigado, mas quanto fica?", "Não, peraí", "Esqueci de falar uma coisa",
               "", "Quero também pro quarto"]:
@@ -214,3 +215,81 @@ async def test_assunto_novo_depois_da_despedida_continua_a_ligacao(monkeypatch) 
     await agente.on_user_turn_completed(None, _Msg("Ah, espera, vocês instalam em Mirassol?"))
     await asyncio.sleep(0.2)
     assert agente.ligacao.encerramento is None and agente.motivo_saida is None
+
+
+
+async def _servidor_audio(status: int = 200):
+    """registrar-ligacao falso recebendo o áudio; devolve (url, pedidos, como parar)."""
+    pedidos: list[dict] = []
+
+    async def receber(req: web.Request) -> web.Response:
+        pedidos.append({"chave": req.headers.get("x-chave"), "ref": req.query.get("audio"),
+                        "tipo": req.headers.get("Content-Type"), "bytes": await req.read()})
+        return web.json_response({"ok": status == 200}, status=status)
+
+    app = web.Application()
+    app.router.add_post("/", receber)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    porta = site._server.sockets[0].getsockname()[1]
+    return f"http://127.0.0.1:{porta}/", pedidos, runner.cleanup
+
+
+async def test_manda_a_gravacao_com_o_ref_da_ligacao(tmp_path) -> None:
+    arq = tmp_path / "audio.ogg"
+    arq.write_bytes(b"OggS-de-mentira")
+    lig = _ligacao()
+    url, pedidos, parar = await _servidor_audio()
+    try:
+        assert await enviar_audio(lig, arq, url=url, chave="k") == "audio_ok"
+    finally:
+        await parar()
+    assert pedidos == [{"chave": "k", "ref": lig.ref, "tipo": "audio/ogg", "bytes": b"OggS-de-mentira"}]
+
+
+async def test_sem_gravacao_ou_sem_cliente_nao_manda_audio(tmp_path) -> None:
+    assert await enviar_audio(_ligacao(), tmp_path / "nao-existe.ogg", url="http://x", chave="k") == "nada"
+    vazio = tmp_path / "vazio.ogg"
+    vazio.write_bytes(b"")
+    assert await enviar_audio(_ligacao(), vazio, url="http://x", chave="k") == "nada"
+    arq = tmp_path / "audio.ogg"
+    arq.write_bytes(b"x")
+    assert await enviar_audio(Ligacao(inicio=INICIO), arq, url="http://x", chave="k") == "nada"
+    assert await enviar_audio(_ligacao(), arq, url="", chave="k") == "sem_url"
+
+
+async def test_ligacao_que_nao_existe_no_dash_nao_fica_repetindo_o_audio(tmp_path) -> None:
+    arq = tmp_path / "audio.ogg"
+    arq.write_bytes(b"x")
+    url, pedidos, parar = await _servidor_audio(404)
+    try:
+        assert await enviar_audio(_ligacao(), arq, url=url, chave="k", espera=0) == "audio_falhou"
+    finally:
+        await parar()
+    assert len(pedidos) == 1
+
+
+def test_pergunta_e_so_no_fim_da_fala() -> None:
+    from equipe import termina_em_pergunta
+    assert termina_em_pergunta("Você me chama lá então?")
+    assert termina_em_pergunta("vocês instalam em Mirassol? ")
+    assert not termina_em_pergunta("Beleza. Meu nome é Luca, está? Muito obrigado.")
+    assert not termina_em_pergunta("Estou, tchau.")
+
+
+def test_fala_dela_de_despedida() -> None:
+    from equipe import ela_se_despediu
+    assert ela_se_despediu("Anotado, Luca. O time te chama no WhatsApp nesse número que você ligou. Obrigada, tchau!")
+    assert ela_se_despediu("Combinado. Até mais!")
+    assert not ela_se_despediu("Consegue me mandar uma foto da janela pelo WhatsApp?")
+    assert not ela_se_despediu("Posso te ajudar em mais alguma coisa antes do tchau?")
+
+
+def test_cliente_que_agradece_com_ta_no_meio_nao_trava_o_desligar() -> None:
+    from equipe import AmandaCliente
+    from livekit.agents import ChatContext
+    ctx = ChatContext()
+    ctx.add_message(role="user", content="Beleza. Meu nome é Luca, está? Muito obrigado.")
+    assert not AmandaCliente(INICIO, chat_ctx=ctx)._cliente_perguntou()

@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover
 
 from agenda import FUSO
 from frases import TrechosCurtos
-from ligacao import Ligacao, enviar, so_digitos
+from ligacao import Ligacao, enviar, enviar_audio, so_digitos
 from reacao import TODAS as REACOES, Reacoes, grupo, sem_reacao
 from sem_silencio import (FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia,
                           ESPERA, ESPERA_DEPOIS_DA_CONTA, com_espera, fala_calcular, sem_anuncio)
@@ -228,8 +228,8 @@ despedida é dita por ela, então NÃO fale a despedida antes de chamar.
 - Nunca encerre no meio de uma pergunta do cliente, nem antes de anotar o contato quando ele quis
   ser chamado. Se ele perguntou algo, responda e espere: só encerre num turno em que ele não
   perguntou nada. Depois de se despedir, não puxe assunto novo.
-- Depois de encerrar_ligacao você não fala mais nada: o cliente ainda pode responder "obrigado,
-  tchau" e a linha cai sozinha uns segundos depois, como numa ligação de verdade.
+- Depois de encerrar_ligacao você fica em silêncio. Não responda ao agradecimento e não explique
+  nada sobre a ligação ou sobre desligar.
 
 # Orçamento
 {CALCULADORA}- Pagamento: 4x sem juros no cartão ou 5% à vista (já vem no fale_assim). Prazo, só se
@@ -564,10 +564,12 @@ class AmandaCliente(AmandaEquipe):
         await super().on_user_turn_completed(turn_ctx, new_message)
 
     def _cliente_perguntou(self) -> bool:
-        """A última fala do cliente é pergunta? (o Deepgram pontua: "vocês instalam em Mirassol?")"""
+        """A última fala do cliente termina em pergunta? (o Deepgram pontua: "vocês instalam em
+        Mirassol?"). Só o fim conta: "Meu nome é Luca, tá? Muito obrigado." não é pergunta, e o "?"
+        no meio travava o desligar (teste de 20/10: ela deu tchau e a linha ficou aberta)."""
         for item in reversed(self.chat_ctx.items):
             if getattr(item, "type", None) == "message" and item.role == "user":
-                return "?" in (item.text_content or "")
+                return termina_em_pergunta(item.text_content or "")
         return False
 
     async def desligar(self, motivo: str) -> None:
@@ -588,6 +590,11 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
     def _guardar(ev) -> None:
         if getattr(ev.item, "type", None) == "message":
             lig.ouvir(ev.item.role, ev.item.text_content)
+            # ela disse tchau sem chamar encerrar_ligacao: a linha cai do mesmo jeito, depois da espera
+            # (teste de 20/10: deu tchau, não desligou e 15 s depois perguntou "você ainda está aí?")
+            if (ev.item.role == "assistant" and not agente.motivo_saida and not lig.encerramento
+                    and ela_se_despediu(ev.item.text_content or "")):
+                agente._despedir("atendimento_concluido", ESPERA_SEM_RESPOSTA)
 
     def _linha(p) -> None:
         # ligação de telefone (SIP): o LiveKit traz o número do cliente nesse atributo
@@ -622,6 +629,7 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
 
     async def _no_fim() -> None:
         await _uma_vez()
+        await _audio_uma_vez()
 
     ctx.add_shutdown_callback(_no_fim)
 
@@ -629,6 +637,7 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
         # manda antes de fechar: no console o processo pode acabar junto com a sessão
         await _uma_vez()
         await session.aclose()
+        await _audio_uma_vez()
         try:  # numa linha de verdade, apagar a sala derruba a chamada; no console a sala é de mentira
             await ctx.delete_room()
         except Exception:  # noqa: BLE001
@@ -636,6 +645,25 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
         ctx.shutdown("ligação encerrada")
 
     agente._ao_desligar = _desligar_de_verdade
+
+    # a gravação (audio.ogg do LiveKit) só fecha com a sessão: sobe depois dela, uma vez só
+    audio: list[asyncio.Future] = []
+
+    async def _subir_audio() -> None:
+        await session.aclose()  # fecha o arquivo; repetir não faz mal
+        arq = ctx.session_directory / "audio.ogg"
+        if os.environ.get("DESLIGAR_ARQUIVO"):  # teste no PC: fica ao lado da conversa, para ouvir
+            salvar_audio(lig, arq)
+        await _uma_vez()  # a linha da ligação tem que existir no Dash antes do áudio
+        resultado = await enviar_audio(lig, arq)
+        print(f"áudio da ligação {lig.ref}: {resultado}", flush=True)
+
+    def _audio_uma_vez() -> asyncio.Future:
+        if not audio:
+            audio.append(asyncio.ensure_future(_subir_audio()))
+        return audio[0]
+
+    session.on("close", lambda _ev: _audio_uma_vez())
 
     async def _encerrar_pelo_codigo(fala: str, motivo: str) -> None:
         if lig.encerramento:
@@ -687,16 +715,33 @@ ESPERA_TCHAU = float(os.environ.get("ESPERA_TCHAU") or 3)
 ESPERA_SEM_RESPOSTA = float(os.environ.get("ESPERA_SEM_RESPOSTA") or 5)
 _TCHAU = re.compile(r"\b(tchau|obrigad[oa]|brigad[oa]|valeu|vlw|até|falou|beleza|tá bom|ta bom|ok|okay|"
                     r"de nada|igualmente|combinado|joia|jóia|fechou|fechado|certo|perfeito|isso|abraço|"
-                    r"bom dia|boa tarde|boa noite|tenha um|pra você também|pra vc também)\b", re.IGNORECASE)
+                    r"bom dia|boa tarde|boa noite|tenha um|pra você também|pra vc também|agradeç\w*|agradec\w*|eu que|"
+                    r"imagina|disponha|por nada|nada não|tudo certo|tá certo|ta certo)\b", re.IGNORECASE)
 _ASSUNTO_NOVO = re.compile(r"\b(espera|peraí|pera aí|mas|outra coisa|pergunta|dúvida|duvida|esqueci|quanto|"
                            r"não|nao)\b", re.IGNORECASE)
+
+
+def termina_em_pergunta(texto: str) -> bool:
+    return texto.strip().rstrip(" .!…").endswith("?")
+
+
+_TCHAU_DELA = re.compile(r"\b(tchau|até mais|até logo)\b", re.IGNORECASE)
+
+
+def ela_se_despediu(texto: str) -> bool:
+    """A fala dela é despedida ("Obrigada, tchau!")? Sem pergunta no fim: "tchau?" não conta."""
+    return bool(_TCHAU_DELA.search(texto)) and not termina_em_pergunta(texto)
 
 
 def e_despedida(texto: str) -> bool:
     """A resposta do cliente à despedida é só despedida ("obrigado, tchau")? Pergunta ou assunto novo
     não é: aí a ligação continua."""
     t = texto.strip()
-    return bool(t) and "?" not in t and bool(_TCHAU.search(t)) and not _ASSUNTO_NOVO.search(t)
+    if not t or termina_em_pergunta(t) or _ASSUNTO_NOVO.search(t):
+        return False
+    # "Eu que agradeço." não estava na lista e virou assunto novo (teste de 20/10): ela respondeu
+    # e a linha não caiu
+    return bool(_TCHAU.search(t))
 
 
 # o que ela diz quando é o código que encerra (silêncio do outro lado ou ligação longa demais)
@@ -708,6 +753,19 @@ LIGACAO_MAX_MIN = float(os.environ.get("LIGACAO_MAX_MIN") or 10)
 
 ENVIOS = RECADOS.parent / "ligacoes.log"
 CONVERSAS = RECADOS.parent / "conversas"
+
+
+def salvar_audio(lig: Ligacao, arq: Path) -> Path | None:
+    """A gravação da ligação de teste ao lado da conversa, com o mesmo nome (.ogg)."""
+    try:
+        if not arq.exists():
+            return None
+        CONVERSAS.mkdir(parents=True, exist_ok=True)
+        destino = CONVERSAS / f"{lig.inicio:%Y-%m-%d_%H%M}_{lig.ref[-8:]}.ogg"
+        destino.write_bytes(arq.read_bytes())
+        return destino
+    except OSError:
+        return None
 
 
 def salvar_conversa(lig: Ligacao) -> Path | None:
@@ -752,7 +810,11 @@ async def conversar(ctx: agents.JobContext) -> None:
     agora = datetime.now(FUSO)
     session = criar_sessao()
     agente = AmandaCliente(agora) if PUBLICO == "cliente" else AmandaEquipe(agora)
-    await session.start(room=ctx.room, agent=agente)
+    # grava o áudio da ligação de cliente (sobe para o Dash no fim, aba Agente IA > Ligações);
+    # GRAVAR=0 desliga. Só o áudio: o resto (traces, logs) não serve para a loja
+    gravar = isinstance(agente, AmandaCliente) and os.environ.get("GRAVAR", "1") == "1"
+    await session.start(room=ctx.room, agent=agente,
+                        record={"audio": True, "traces": False, "logs": False, "transcript": False} if gravar else False)
     if isinstance(agente, AmandaCliente):
         acompanhar_ligacao(ctx, session, agente)
     Vigia(session)

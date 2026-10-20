@@ -3,6 +3,7 @@
  *
  * A Amanda de voz chama quando a ligação termina:
  *   POST com header x-chave: <LIGACAO_SECRET> e o corpo de ./registrar.ts (Ligacao).
+ *   Depois, POST ?audio=<ref> com a gravação (audio/ogg): ./audio.ts.
  * Guarda a ligação, cria/atualiza o lead no CRM, manda as mensagens no WhatsApp pelo Chatwoot,
  * deixa a nota da equipe e o lembrete na memória da Amanda do WhatsApp. Sem JWT: o servidor da
  * voz não tem usuário, a prova é a chave.
@@ -12,6 +13,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { preflight, resposta } from '../_shared/resposta.ts'
 import type { Pedir } from './chatwoot.ts'
+import { BUCKET, guardarAudio, type Arquivos } from './audio.ts'
 import { registrar, type Db, type Lead, type Ligacao, type StatusWhatsapp } from './registrar.ts'
 
 const CONTA = 1
@@ -63,10 +65,34 @@ const db: Db = {
   },
 }
 
+const arquivos: Arquivos = {
+  async existeLigacao(ref) {
+    return !!ok(await sb.from('ligacoes').select('id').eq('ref', ref).maybeSingle())
+  },
+  async subir(caminho, bytes, tipo) {
+    const { error } = await sb.storage.from(BUCKET).upload(caminho, bytes, { contentType: tipo, upsert: true })
+    if (error) throw error
+  },
+  async marcar(ref, caminho) {
+    ok(await sb.from('ligacoes').update({ audio_path: caminho }).eq('ref', ref))
+  },
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return preflight()
   const esperado = Deno.env.get('LIGACAO_SECRET')
   if (!esperado || req.headers.get('x-chave') !== esperado) return resposta(401, { erro: 'não autorizado' })
+  // a gravação chega depois, num POST próprio (?audio=<ref>, corpo binário): ver ./audio.ts
+  const refAudio = new URL(req.url).searchParams.get('audio')
+  if (refAudio !== null) {
+    try {
+      const r = await guardarAudio(refAudio, req.headers.get('content-type'), new Uint8Array(await req.arrayBuffer()), arquivos)
+      return resposta(r.status, r.corpo)
+    } catch (e) {
+      console.error('registrar-ligacao áudio', e)
+      return resposta(500, { erro: e instanceof Error ? e.message : String(e) })
+    }
+  }
   let lig: Ligacao
   try {
     lig = await req.json()

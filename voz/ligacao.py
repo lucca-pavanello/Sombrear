@@ -110,6 +110,37 @@ async def enviar(lig: Ligacao, url: str | None = None, chave: str | None = None,
     return "falhou"
 
 
+async def enviar_audio(lig: Ligacao, arquivo: Path, url: str | None = None, chave: str | None = None,
+                       espera: float = 1.0) -> str:
+    """Manda a gravação da ligação (audio.ogg do LiveKit) para o Dash, depois de enviar(): a linha
+    da ligação já tem que existir lá. Devolve 'nada' (sem cliente ou sem gravação), 'sem_url'
+    (teste no PC), 'audio_ok' ou 'audio_falhou'. Falhar aqui não atrapalha o resto: a transcrição
+    e o resumo já foram."""
+    if not lig.cliente_falou or not arquivo.exists() or arquivo.stat().st_size == 0:
+        return "nada"
+    url = url if url is not None else os.environ.get("REGISTRAR_LIGACAO_URL", "")
+    chave = chave if chave is not None else os.environ.get("LIGACAO_SECRET", "")
+    if not url:
+        return "sem_url"
+    dados = arquivo.read_bytes()
+    ultimo = ""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http:
+        for tentativa in range(TENTATIVAS):
+            try:
+                async with http.post(url, params={"audio": lig.ref}, data=dados,
+                                     headers={"x-chave": chave, "Content-Type": "audio/ogg"}) as r:
+                    if r.status == 200:
+                        return "audio_ok"
+                    ultimo = f"{r.status} {await r.text()}"
+                    if r.status in (400, 401, 404, 413):
+                        break
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                ultimo = repr(e)
+            await asyncio.sleep(espera * (tentativa + 1))
+    log.error("áudio da ligação %s não chegou no Dash: %s", lig.ref, ultimo)
+    return "audio_falhou"
+
+
 def _no_arquivo(corpo: dict, recados: Path | None) -> None:
     from equipe import RECADOS  # import tardio: equipe importa este módulo
     destino = recados or RECADOS
