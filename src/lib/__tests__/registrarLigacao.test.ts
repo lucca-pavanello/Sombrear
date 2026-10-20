@@ -121,10 +121,10 @@ describe('telefone e nome', () => {
 describe('textos', () => {
   const Q = '2026-10-20T13:43:10Z'  // 10:43 em São Paulo
 
-  it('orçamento: cumprimenta, confere a grafia do nome e manda o valor pedindo a foto do cômodo que ele falou', () => {
+  it('orçamento: cumprimenta sem o nome, confere o nome e manda o valor pedindo a foto do cômodo que ele falou', () => {
     const [a, b, c] = mensagensCliente({ nome: 'Juliana Prado Souza', assunto: 'orcamento', resumo: 'x', orcamento: ORC, ambientes: ['sala'], quando: Q })
-    expect(a).toBe('Bom dia, Juliana, tudo bem? Aqui é da Sombrear, a gente acabou de se falar por telefone.')
-    expect(b).toBe('Anotei seu nome como Juliana Prado Souza, é assim que escreve?')
+    expect(a).toBe('Bom dia, tudo bem? Aqui é da Sombrear. A gente acabou de se falar por telefone.')
+    expect(b).toBe('Anotei seu nome como Juliana Prado Souza, está correto?')
     expect(c).toContain('• 01 Rolô BK Branco 2,00 x 2,00')
     expect(c).toContain('a partir de R$ 931,00 em até 4x, ou R$ 884,45 à vista')
     expect(c).toContain('acréscimo de R$ 85,00')
@@ -160,7 +160,7 @@ describe('textos', () => {
 
   it('sem nome: pergunta o nome do jeito da loja', () => {
     const [a, b] = mensagensCliente({ nome: null, assunto: 'duvida', resumo: 'x', quando: Q })
-    expect(a).toBe('Bom dia, tudo bem? Aqui é da Sombrear, a gente acabou de se falar por telefone.')
+    expect(a).toBe('Bom dia, tudo bem? Aqui é da Sombrear. A gente acabou de se falar por telefone.')
     expect(b).toBe('Qual o seu nome?')
   })
 

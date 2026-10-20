@@ -86,9 +86,9 @@ export function mensagensCliente(p: {
   nome: string | null; assunto: Assunto; resumo: string; orcamento?: Orcamento | null
   ambientes?: string[] | null; quando: string
 }): string[] {
-  const primeiro = primeiroNome(p.nome)
-  const oi = `${saudacao(p.quando)}${primeiro ? ', ' + primeiro : ''}, tudo bem? Aqui é da Sombrear, a gente acabou de se falar por telefone.`
-  const nome = p.nome?.trim() ? `Anotei seu nome como ${p.nome.trim()}, é assim que escreve?` : 'Qual o seu nome?'
+  // o nome não vai no "oi": a voz pode ter entendido errado, então ele só aparece na pergunta que confere
+  const oi = `${saudacao(p.quando)}, tudo bem? Aqui é da Sombrear. A gente acabou de se falar por telefone.`
+  const nome = p.nome?.trim() ? `Anotei seu nome como ${p.nome.trim()}, está correto?` : 'Qual o seu nome?'
   if (p.assunto === 'outro') {
     return [oi, nome, 'Já passei seu recado pro pessoal da loja, eles te respondem por aqui mesmo.']
   }
