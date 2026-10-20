@@ -92,6 +92,7 @@ function chatwootFalso(inicial: { contatos?: any[]; conversas?: any[]; falharEm?
 }
 
 const AGORA = () => new Date('2026-10-20T13:43:30Z')
+const SEM_PAUSA = async () => {}
 
 describe('telefone e nome', () => {
   it('normaliza para 55 + DDD + número e recusa o que não é telefone', () => {
@@ -118,11 +119,9 @@ describe('telefone e nome', () => {
 })
 
 describe('textos', () => {
-  it('orçamento: confere o nome numa mensagem e manda valor + pedido de foto na outra', () => {
+  it('orçamento: cumprimenta pelo primeiro nome numa mensagem e manda valor + pedido de foto na outra', () => {
     const [a, b] = mensagensCliente({ nome: 'Juliana Prado Souza', assunto: 'orcamento', resumo: 'x', orcamento: ORC })
-    expect(a).toContain('Oi, Juliana! Aqui é da Sombrear')
-    expect(a).toContain('se falou agora por telefone')
-    expect(a).toContain('anotei seu nome como *Juliana Prado Souza*, tá certinho?')
+    expect(a).toBe('Oi, Juliana, tudo bem? Aqui é da Sombrear, a gente se falou agora há pouco por telefone 😊')
     expect(b).toContain('• 01 Rolô BK Branco 2,00 x 2,00')
     expect(b).toContain('a partir de R$ 931,00 em até 4x, ou R$ 884,45 à vista')
     expect(b).toContain('acréscimo de R$ 85,00')
@@ -138,8 +137,9 @@ describe('textos', () => {
 
   it('outro assunto: avisa que o time responde, sem prometer data', () => {
     const [, b] = mensagensCliente({ nome: 'Carlos Lima', assunto: 'outro', resumo: 'Quer saber quando vão instalar a persiana que comprou.' })
-    expect(b).toContain('Seu recado já está com o time: Quer saber quando vão instalar a persiana que comprou.')
+    expect(b).toContain('Já passei seu recado pro pessoal da loja')
     expect(b).toContain('Eles te respondem por aqui')
+    expect(b).not.toContain('Quer saber')  // o resumo é anotação da equipe, não fala pro cliente
     expect(b).not.toMatch(/hoje|amanhã|já já/i)
   })
 
@@ -161,10 +161,25 @@ describe('textos', () => {
   })
 })
 
+describe('registrar: ordem das mensagens', () => {
+  it('espera entre uma mensagem e outra, para o "oi" chegar antes da foto', async () => {
+    const b = bancoFalso(); const c = chatwootFalso()
+    const eventos: string[] = []
+    const pedir: Pedir = async (metodo, caminho, corpo) => {
+      if (metodo === 'POST' && caminho.endsWith('/messages') && !(corpo as { private?: boolean })?.private) {
+        eventos.push('msg:' + String((corpo as { content: string }).content).slice(0, 3))
+      }
+      return c.pedir(metodo, caminho, corpo)
+    }
+    await registrar(LIG, b.db, pedir, AGORA, async ms => { eventos.push('pausa:' + ms) })
+    expect(eventos).toEqual(['msg:Oi,', 'pausa:3000', 'msg:Te '])
+  })
+})
+
 describe('registrar: cliente novo', () => {
   it('cria lead de origem ligação, contato e conversa no Chatwoot, manda 2 mensagens, nota e etiqueta', async () => {
     const b = bancoFalso(); const c = chatwootFalso()
-    const r = await registrar(LIG, b.db, c.pedir, AGORA)
+    const r = await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.status).toBe('enviado')
 
     expect(b.criados[0]).toMatchObject({
@@ -189,14 +204,14 @@ describe('registrar: cliente novo', () => {
 
   it('sem telefone confirmado usa o número da linha', async () => {
     const b = bancoFalso(); const c = chatwootFalso()
-    const r = await registrar({ ...LIG, telefone: null }, b.db, c.pedir, AGORA)
+    const r = await registrar({ ...LIG, telefone: null }, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.status).toBe('enviado')
     expect(b.criados[0].whatsapp).toBe('5517998765432')
   })
 
   it('sem número nenhum: só guarda a ligação, não mexe em CRM nem WhatsApp', async () => {
     const b = bancoFalso(); const c = chatwootFalso()
-    const r = await registrar({ ...LIG, telefone: null, telefone_chamador: null }, b.db, c.pedir, AGORA)
+    const r = await registrar({ ...LIG, telefone: null, telefone_chamador: null }, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.status).toBe('sem_telefone')
     expect(b.criados).toHaveLength(0)
     expect(c.chamadas).toHaveLength(0)
@@ -213,7 +228,7 @@ describe('registrar: cliente que já existe', () => {
   it('atualiza o lead e usa a conversa que já existe, sem criar contato', async () => {
     const b = bancoFalso([existente()])
     const c = chatwootFalso({ conversas: [{ id: 356, inbox_id: 5, meta: { sender: { id: 42 } } }] })
-    const r = await registrar(LIG, b.db, c.pedir, AGORA)
+    const r = await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r).toMatchObject({ status: 'enviado', conversa: 356, lead_id: 'lead-antigo' })
     expect(b.criados).toHaveLength(0)
     expect(c.contatos).toHaveLength(0)
@@ -231,7 +246,7 @@ describe('registrar: cliente que já existe', () => {
       conversas: [{ id: 300, inbox_id: 5, meta: { sender: { id: 42 } } }, { id: 400, inbox_id: 5, meta: { sender: { id: 42 } } }],
     })
     c.etiquetas.set(400, ['orcamento-calcular'])
-    const r = await registrar(LIG, b.db, c.pedir, AGORA)
+    const r = await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.conversa).toBe(400) // a mais recente da inbox do WhatsApp
     expect(c.etiquetas.get(400)).toEqual(['orcamento-calcular', 'ligacao'])
     expect(b.atualizacoes[0].campos.nome).toBeUndefined() // não troca o nome que a equipe já tinha
@@ -241,7 +256,7 @@ describe('registrar: cliente que já existe', () => {
   it('equipe já assumiu: nada vai pro cliente, só a nota', async () => {
     const b = bancoFalso([existente({ chatwoot_labels: 'humano, lead-gelado' })])
     const c = chatwootFalso({ conversas: [{ id: 356, inbox_id: 5, meta: { sender: { id: 42 } } }] })
-    const r = await registrar(LIG, b.db, c.pedir, AGORA)
+    const r = await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.status).toBe('so_nota')
     expect(c.mensagens.filter(m => !m.corpo.private)).toHaveLength(0)
     expect(c.mensagens[0].corpo.content).toContain('A equipe já atendia esse cliente')
@@ -252,7 +267,7 @@ describe('registrar: cliente que já existe', () => {
 describe('registrar: falhas e repetição', () => {
   it('Chatwoot fora do ar: o lead fica no CRM e a ligação marca o erro', async () => {
     const b = bancoFalso(); const c = chatwootFalso({ falharEm: '/contacts/search' })
-    const r = await registrar(LIG, b.db, c.pedir, AGORA)
+    const r = await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.status).toBe('erro')
     expect(b.criados).toHaveLength(1)
     expect(b.memoria).toHaveLength(0)
@@ -262,16 +277,16 @@ describe('registrar: falhas e repetição', () => {
 
   it('a mesma ligação enviada de novo não manda mensagem duas vezes', async () => {
     const b = bancoFalso(); const c = chatwootFalso()
-    await registrar(LIG, b.db, c.pedir, AGORA)
+    await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     const antes = c.mensagens.length
-    const r = await registrar(LIG, b.db, c.pedir, AGORA)
+    const r = await registrar(LIG, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r).toMatchObject({ status: 'enviado', repetida: true })
     expect(c.mensagens.length).toBe(antes)
   })
 
   it('outro assunto sem resumo não quebra', async () => {
     const b = bancoFalso(); const c = chatwootFalso()
-    const r = await registrar({ ...LIG, assunto: 'outro', resumo: '', orcamento: null }, b.db, c.pedir, AGORA)
+    const r = await registrar({ ...LIG, assunto: 'outro', resumo: '', orcamento: null }, b.db, c.pedir, AGORA, SEM_PAUSA)
     expect(r.status).toBe('enviado')
     expect(c.mensagens.find(m => !m.corpo.private && m.corpo.content.includes('recado'))).toBeTruthy()
   })

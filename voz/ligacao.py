@@ -39,6 +39,9 @@ class Ligacao:
     falas: list[dict] = field(default_factory=list)
     contato: dict | None = None
     orcamento: dict | None = None
+    # por que acabou, quando foi ela quem desligou: atendimento_concluido, cliente_despediu,
+    # conversa_sem_avanco, fora_do_assunto, silencio, tempo_maximo ou teste
+    encerramento: str | None = None
 
     def ouvir(self, quem: str, texto: str | None) -> None:
         """Uma fala da conversa: quem é 'user' (cliente) ou 'assistant' (Amanda)."""

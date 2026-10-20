@@ -61,7 +61,13 @@ function diaBR(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }).replace(/\//g, '-')
 }
 
-export async function registrar(lig: Ligacao, db: Db, pedir: Pedir, agora: () => Date = () => new Date()): Promise<Resultado> {
+// o Chatwoot entrega ao WhatsApp em segundo plano: mandadas no mesmo segundo, as mensagens chegavam
+// trocadas (a da foto antes do "oi"). A pausa garante a ordem.
+const PAUSA_ENTRE_MENSAGENS_MS = 3000
+const esperar = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
+export async function registrar(lig: Ligacao, db: Db, pedir: Pedir, agora: () => Date = () => new Date(),
+  pausa: (ms: number) => Promise<void> = esperar): Promise<Resultado> {
   const assunto: Assunto = lig.assunto ?? 'duvida'
   const resumo = lig.resumo?.trim() || 'Ligação sem resumo.'
   const transcricao = lig.transcricao ?? []
@@ -111,7 +117,10 @@ export async function registrar(lig: Ligacao, db: Db, pedir: Pedir, agora: () =>
       numero, identificador, nome: base.nome, conversaConhecida: Number(lead.id_conversa_chatwoot) || null,
     })
     const mensagens = assumiu ? [] : mensagensCliente({ nome: base.nome, assunto, resumo, orcamento: lig.orcamento })
-    for (const m of mensagens) await enviarAoCliente(pedir, conv.conversaId, m)
+    for (const [i, m] of mensagens.entries()) {
+      if (i > 0) await pausa(PAUSA_ENTRE_MENSAGENS_MS)
+      await enviarAoCliente(pedir, conv.conversaId, m)
+    }
     await notaInterna(pedir, conv.conversaId, notaEquipe({
       inicio: lig.inicio, fim: lig.fim, nome: base.nome, telefone: numero,
       telefoneChamador: base.telefone_chamador, assunto, resumo, orcamento: lig.orcamento, transcricao, equipeAssumiu: assumiu,

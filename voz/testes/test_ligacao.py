@@ -119,3 +119,51 @@ async def test_cliente_desligou_sem_falar_nao_manda_nada(tmp_path) -> None:
     lig.ouvir("assistant", "Boa tarde, Amanda da Sombrear Decor aqui.")
     assert await enviar(lig, url="http://127.0.0.1:1/", recados=tmp_path / "r.jsonl") == "nada"
     assert not (tmp_path / "r.jsonl").exists()
+
+
+async def test_numero_de_mentira_do_console_nao_vira_telefone() -> None:
+    """No console a sala é falsa e o atributo da linha vem como MagicMock: não pode virar o
+    telefone da ligação (20/10: quebrava o anotar_contato e o envio ao Dash)."""
+    from unittest.mock import MagicMock
+    from equipe import AmandaCliente
+    agente = AmandaCliente(INICIO)
+    await agente.conhecer_linha(MagicMock())
+    await agente.conhecer_linha("123")
+    assert agente.ligacao.telefone_linha is None
+    json.dumps(agente.ligacao.corpo())  # o corpo continua serializável
+
+
+def test_salva_a_conversa_de_teste(tmp_path, monkeypatch) -> None:
+    import equipe
+    monkeypatch.setattr(equipe, "CONVERSAS", tmp_path)
+    arq = equipe.salvar_conversa(_ligacao())
+    texto = arq.read_text(encoding="utf-8")
+    assert "Amanda: Boa tarde, Amanda da Sombrear Decor aqui." in texto
+    assert "Cliente: Quanto fica uma rolô de dois por dois?" in texto
+    assert "Juliana Prado" in texto
+
+
+async def test_desligar_acontece_uma_vez_so() -> None:
+    from equipe import AmandaCliente
+    agente = AmandaCliente(INICIO)
+    chamadas = []
+
+    async def ao_desligar() -> None:
+        chamadas.append(1)
+
+    agente._ao_desligar = ao_desligar
+    await agente.desligar("cliente_despediu")
+    await agente.desligar("silencio")
+    assert chamadas == [1]
+    assert agente.ligacao.encerramento == "cliente_despediu"
+
+
+def test_nao_encerra_com_pergunta_do_cliente_no_ar() -> None:
+    from livekit.agents import llm as lk_llm
+    from equipe import AmandaCliente
+    ctx = lk_llm.ChatContext()
+    ctx.add_message(role="user", content="Vocês instalam em Mirassol também?")
+    assert AmandaCliente(INICIO, chat_ctx=ctx)._cliente_perguntou()
+    ctx2 = lk_llm.ChatContext()
+    ctx2.add_message(role="user", content="Tá bom, obrigado. Tchau!")
+    assert not AmandaCliente(INICIO, chat_ctx=ctx2)._cliente_perguntou()
