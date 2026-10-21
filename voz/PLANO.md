@@ -88,6 +88,15 @@ pela voz. Atendimento e agendamento vêm depois, se fizer sentido.
      serve ao vivo; Supertonic 2,6 a 3,2 s, OmniVoice 10 a 30 vezes mais lento que o tempo real e com
      pesos sem uso comercial, Piper sem voz feminina em pt-BR. Ordem pedida pelo Lucca: primeiro
      testar a ligação com qualquer voz, a voz final por último (talvez clonada de alguém, com autorização).
+   - Pronta para o ar (21/10, pensando em levar para outros clientes): servidor fora do PC (LiveKit
+     Cloud, us-east, `local/publicar.ps1`; servidor próprio só compensa com muito volume e perderia o
+     Deepgram e o detector de turno do Cloud); calculadora com o preço do banco na hora (função
+     `orcamento-voz`, mesmas rotas da bancada); conhecimento gerado do n8n (`conhecimento/atualizar.py`,
+     a publicação para se ficou velho); cérebro configurável por provedor, com o DeepSeek em provedor
+     dos EUA para não passar nome e telefone pela China (`local/medir_cerebro.py` escolhe).
+     Ficou para decidir com o Lucca: aviso de gravação (hoje grava e não avisa; nos testes fica assim),
+     a voz clonada (penúltimo passo) e os números que ela atende (último). Antes de simular ligação no
+     Cloud (`lk agent simulate audio`), um modo teste: hoje toda ligação vai para o Dash e o CRM.
 4. **Crescer aos poucos**: a mesma Amanda ganhando uma coisa por vez (agenda de visitas, que já
    está pronta na 0031; aviso à equipe; o que mais for pedido).
 5. **Piloto com cliente** e 6. **frentes abaixo**: mais para frente.
