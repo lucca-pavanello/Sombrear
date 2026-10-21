@@ -1,4 +1,4 @@
-<!-- Copiado do n8n (workflow "Amanda | Sobre a Sombrear") em 17/10/2026. A fonte da verdade continua no n8n até a voz ir pro ar. -->
+<!-- Gerado por atualizar.py do n8n (workflow "Amanda | Sobre a Sombrear", alterado lá em 2026-09-24). Não editar aqui: mudar no n8n e rodar o script. -->
 
 # 🕒 CONTEXTO TEMPORAL E LOCAL
 - Localização Sede: São José do Rio Preto, SP.

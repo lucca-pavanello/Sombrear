@@ -10,8 +10,7 @@ import { readFileSync } from 'node:fs'
 import { orcarPersiana } from '../../src/lib/voz/orcar'
 import { carregarFoto } from './foto'
 const dir = process.argv[2]
-const ler = (t: string) => JSON.parse(readFileSync(`${dir}/${t}.json`, 'utf8'))[0].d
-const d = carregarFoto(dir)
+const d = await carregarFoto(dir)
 const MOD: Record<string, any> = { 'Rolo': 'Rolo', 'PH Aluminio': 'PH_Aluminio', 'Double': 'Double', 'PV': 'PV', 'Romana': 'Romana' }
 const g = JSON.parse(readFileSync(`${dir}/orcamentos_ia.json`, 'utf8'))[0].d
 let bate = 0, perto = 0, erro = 0; const linhas: string[] = []

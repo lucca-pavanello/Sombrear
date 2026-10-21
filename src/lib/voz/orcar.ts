@@ -5,8 +5,8 @@
  * "Tecido mais barato" não é regra paralela: calcula todo tecido que serve no modelo (e no
  * tipo pedido, se houver) e fica com o menor total. O número é sempre o do motor.
  */
-import { simular, type AcabamentoSim, type DadosSim, type EntradaSim, type ModeloSim } from '../simulador'
-import { calcularCortina, type DadosCortina, type ModeloCortina, type SuporteCortina } from '../cortina'
+import { simular, type AcabamentoSim, type DadosSim, type EntradaSim, type ModeloSim } from '../simulador.ts'
+import { calcularCortina, type DadosCortina, type ModeloCortina, type SuporteCortina } from '../cortina.ts'
 
 export type TipoTecido = 'blackout' | 'tela_solar' | 'tela_solar_1' | 'tela_solar_3' | 'decorativo'
 

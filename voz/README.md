@@ -1,18 +1,25 @@
 # Voz da Sombrear
 
-A Amanda falando. Primeiro produto do laboratório (Lucca, 17/10/2026). **Nada no ar**: sem número,
-sem deploy, até ser aprovado ouvindo. Fases e decisões em `PLANO.md`.
+A Amanda falando. Primeiro produto do laboratório (Lucca, 17/10/2026). **Sem número ainda**: desde
+21/10 ela roda no LiveKit Cloud (agente `sombrear-cliente`, região us-east), mas só atende quem chama
+pelo nome no Agent Console. Fases e decisões em `PLANO.md`.
 
 ## O que tem aqui
 
 - **Amanda da equipe (fase 1)**: `equipe.py`. A mesma Amanda do WhatsApp respondendo a equipe:
-  produto, indicação por ambiente e orçamento. O conhecimento está em `conhecimento/`, copiado do
-  n8n em 17/10/2026 (o n8n continua sendo a fonte enquanto a voz não vai pro ar).
+  produto, indicação por ambiente e orçamento.
+- **Conhecimento**: `conhecimento/*.md` é gerado do n8n por `conhecimento/atualizar.py` (os 4
+  workflows de conhecimento e a seção 8 + 9.3b do prompt principal, sem a mídia do WhatsApp). A fonte
+  é o n8n: mudou lá, roda o script e commita. `--conferir` diz se ficou velho, e a publicação para
+  se ficou.
 - **Orçamento**: `src/lib/voz/orcar.ts`, sempre pelo motor do Dash (`simulador.ts` e `cortina.ts`).
+  No ar a voz chama a função `orcamento-voz` (preço do banco na hora, guardado 60 s, chave
+  `LIGACAO_SECRET`); na bancada, `orcamento/servidor.ts` com a foto. As rotas são as mesmas
+  (`src/lib/voz/rotas.ts`). A voz acorda a função quando a ligação começa: parada, a 1ª chamada leva
+  ~3,7 s; acordada, ~0,6 s (21/10).
   "Tecido mais barato" calcula todos os tecidos que servem e fica com o menor total; tecido com
   limite no nome ("ATÉ 1,40 X 1,40") só entra se a medida couber; medida do vão soma os aumentos
-  da loja (persiana +0,20 × +0,20; cortina +0,40 × +0,40, porta +0,20 na altura). A voz chama por
-  HTTP o `orcamento/servidor.ts`.
+  da loja (persiana +0,20 × +0,20; cortina +0,40 × +0,40, porta +0,20 na altura).
 - **Ligação → CRM → WhatsApp**: `ligacao.py` junta a ligação e manda, quando ela termina, para
   `supabase/functions/registrar-ligacao` (lead no CRM, mensagens e nota no Chatwoot, lembrete na
   memória da Amanda do WhatsApp). Env na voz: `REGISTRAR_LIGACAO_URL` e `LIGACAO_SECRET`; sem a URL
@@ -37,6 +44,22 @@ PYTHONPATH=. uv run --group local python local/medir_turnos.py <wav> [<wav>...] 
 
 A foto dos preços é um JSON por tabela `precos_*` (mais `precos_tecido_modelos`), lido só para
 leitura do banco da Sombrear. Fica fora do repo.
+
+## No ar (LiveKit Cloud)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File voz\local\publicar.ps1             # nova versão (confere o conhecimento antes)
+powershell -ExecutionPolicy Bypass -File voz\local\publicar.ps1 -SoChaves   # só troca chave ou configuração
+```
+Cérebro, voz e calculadora do ar são parâmetros do `publicar.ps1` (`-Llm`, `-Voz`, `-VozId`), não do
+código. As chaves saem do `~/.secrets/sombrear-voz.env` para um arquivo temporário e vão para os
+secrets do agente; nada no repo. Testar: Agent Console do projeto com o agente `sombrear-cliente`
+(`lk agent logs` na pasta `voz` mostra o que aconteceu). O `livekit.toml` só guarda o projeto e o id
+do agente. Toda ligação, inclusive de teste, vai para o Dash (aba Ligações) e para o CRM.
+
+Cérebro sem passar pela China: `local/medir_cerebro.py` mede cada provedor com o prompt e as
+ferramentas reais (1ª palavra, cache e se veio raciocínio). Linha de base 21/10, DeepSeek oficial:
+0,92 s de mediana, 98% do prompt do cache.
 
 ## Fase 3: testar pelo celular, de graça
 
@@ -89,10 +112,12 @@ Os outros 10:
 | Peça | Escolha | Custo |
 |---|---|---|
 | Orquestrador | LiveKit Agents, autohospedado | 0 |
-| Entender | Muse (Meta) por API, a chave do Dash | centavos por conversa |
+| Entender | DeepSeek V4.1 Flash sem raciocínio (`modelo.py`); no ar, em provedor dos EUA (LGPD) | ~US$ 0,004 por ligação de 3 min |
 | Falar (TTS) | Kokoro, voz "J" (pf_dora 50% + if_sara 25% + pm_alex 25%) | 0 |
 | Falar no teste da fase 3 | ElevenLabs Flash v2.5, voz Jessica (`cgSgspJ2msm6clMCkdW9`), escolhida às cegas pelo Lucca em 17/10/2026; começa a tocar em 0,27 s | grátis até 10 mil créditos |
 | Ouvir (STT) | Deepgram Nova-3 pelo LiveKit Inference (conta LiveKit que já existe; `OUVIDO=local` volta ao Parakeet TDT 0.6b v3 int8 na CPU, fala curta no Canary 1b v2) | US$ 0,0048/min de ligação (Build); local 0 |
+| Onde roda | LiveKit Cloud, us-east (`publicar.ps1`); o código é o mesmo do PC | plano Build: 1.000 min/mês |
+| Calculadora no ar | função `orcamento-voz` do Supabase da Sombrear | 0 |
 | Telefone | LiveKit SIP + número DDD 17 | ~US$ 1 a 4/mês + minuto |
 
 Medido em 17/10/2026 no PC (Ryzen 5 1600, sem GPU): Kokoro leva 1,3 a 2 s por frase curta (o

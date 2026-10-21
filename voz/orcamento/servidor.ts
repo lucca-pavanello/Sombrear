@@ -1,22 +1,18 @@
 /**
- * Servidor local de orçamento para a Amanda de voz: expõe src/lib/voz/orcar.ts por HTTP.
+ * Servidor local de orçamento para a Amanda de voz: as rotas de src/lib/voz/rotas.ts por HTTP.
  *
  * Bancada: os preços vêm de uma foto das tabelas precos_* (JSON, um arquivo por tabela, no
- * formato da Management API: [{ "d": [...] }]). No ar, a mesma função vai ler do Supabase.
+ * formato da Management API: [{ "d": [...] }]). No ar é a função orcamento-voz, com os preços do banco.
  *
  *   npx tsx voz/orcamento/servidor.ts <pasta-da-foto> [porta=8791]
  */
 import { createServer } from 'node:http'
-import {
-  orcarCortina, orcarPersiana, tecidosDoModelo,
-  type PedidoCortina, type PedidoPersiana, type TipoTecido,
-} from '../../src/lib/voz/orcar'
-import type { ModeloSim } from '../../src/lib/simulador'
+import { atender } from '../../src/lib/voz/rotas'
 import { carregarFoto } from './foto'
 
 const [dir, porta = '8791'] = process.argv.slice(2)
 if (!dir) { console.error('uso: servidor.ts <pasta-da-foto> [porta]'); process.exit(2) }
-const dados = carregarFoto(dir)
+const dados = await carregarFoto(dir)
 
 createServer(async (req, res) => {
   const responder = (status: number, corpo: unknown) => {
@@ -31,17 +27,8 @@ createServer(async (req, res) => {
       for await (const c of req) bruto += c
       corpo = bruto ? JSON.parse(bruto) : {}
     }
-    if (url.pathname === '/persiana') return responder(200, orcarPersiana(corpo as unknown as PedidoPersiana, dados))
-    if (url.pathname === '/cortina') return responder(200, orcarCortina(corpo as unknown as PedidoCortina, dados))
-    if (url.pathname === '/tecidos') {
-      const modelo = url.searchParams.get('modelo') as ModeloSim | null
-      if (modelo === null) {
-        return responder(200, { cortina: dados.cortina.tecidos.map(t => ({ nome: t.nome, tipo: t.tipo })) })
-      }
-      const tipo = (url.searchParams.get('tipo') || undefined) as TipoTecido | undefined
-      return responder(200, { modelo, tecidos: tecidosDoModelo(modelo, dados, tipo) })
-    }
-    responder(404, { erro: 'rota inexistente' })
+    const r = atender(url.pathname, url.searchParams, corpo, dados)
+    responder(r.status, r.corpo)
   } catch (e) {
     responder(400, { erro: e instanceof Error ? e.message : 'pedido inválido' })
   }

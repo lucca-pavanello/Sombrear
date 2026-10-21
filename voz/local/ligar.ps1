@@ -8,6 +8,7 @@
 #   powershell -ExecutionPolicy Bypass -File voz\local\ligar.ps1 -Voz cartesia    # Ana Paula, pt-BR nativa
 #   ... -Ouvido local                     # ouvir no PC (Parakeet/Canary) em vez do Deepgram (LiveKit Inference)
 #   ... -Velocidade 1.1 -Emocao Content   # controles da Ana Paula (amostras em ~/.cache/sombrear-voz)
+#   ... -Precos foto                      # calculadora no PC com a foto dos precos, em vez da funcao orcamento-voz
 #
 # O servidor de voz da maquina (Parakeet, Canary e Kokoro, ~2 GB de memoria) so sobe com -Ouvido local
 # ou -Voz kokoro.
@@ -16,7 +17,7 @@
 # ~/.secrets/sombrear-voz.env (LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, ELEVEN_API_KEY,
 # CARTESIA_API_KEY, VOZ_ID opcional). Dados: ~/.cache/sombrear-voz (kokoro/ e precos/).
 param([string]$Voz = "kokoro", [string]$Modo = "dev", [string]$Publico = "cliente", [string]$VozId = "", [switch]$SemCanary,
-      [string]$Ouvido = "deepgram/nova-3", [string]$Velocidade = "", [string]$Emocao = "")
+      [string]$Ouvido = "deepgram/nova-3", [string]$Velocidade = "", [string]$Emocao = "", [string]$Precos = "banco")
 $ErrorActionPreference = "Stop"
 
 function Carregar([string]$arq, [hashtable]$troca) {
@@ -53,8 +54,15 @@ $raiz = Split-Path $pastaVoz -Parent
 $logs = "$env:TEMP\sombrear-voz"
 New-Item -ItemType Directory -Force $logs | Out-Null
 
-$orc = Start-Process cmd -ArgumentList "/c", "npx tsx voz/orcamento/servidor.ts `"$dados\precos`"" -WorkingDirectory $raiz `
-    -PassThru -WindowStyle Hidden -RedirectStandardOutput "$logs\orcamento.log" -RedirectStandardError "$logs\orcamento.err"
+# a calculadora: por padrao a funcao orcamento-voz, com o preco do banco na hora (como no ar)
+$orc = $null
+if ($Precos -eq "banco") {
+    if (-not $env:URL_ORCAMENTO) { $env:URL_ORCAMENTO = "https://nlswyjpjzibuvdsaooyg.supabase.co/functions/v1/orcamento-voz" }
+} else {
+    $env:URL_ORCAMENTO = "http://127.0.0.1:8791"
+    $orc = Start-Process cmd -ArgumentList "/c", "npx tsx voz/orcamento/servidor.ts `"$dados\precos`"" -WorkingDirectory $raiz `
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput "$logs\orcamento.log" -RedirectStandardError "$logs\orcamento.err"
+}
 $fala = $null
 if ($vozLocal) {
     $fala = Start-Process uv -ArgumentList "run", "--group", "local", "python", "local/servidor_voz.py" -WorkingDirectory $pastaVoz `
@@ -62,7 +70,8 @@ if ($vozLocal) {
 }
 
 try {
-    $urls = @("http://127.0.0.1:8791/tecidos")
+    $urls = @()
+    if ($orc) { $urls += "http://127.0.0.1:8791/tecidos" }
     if ($vozLocal) { $urls += "http://127.0.0.1:8792/v1/audio/speech" }
     Write-Host "Esperando os servidores ($($urls -join ', '))..."
     foreach ($url in $urls) {
@@ -73,7 +82,7 @@ try {
         }
         if (-not $ok) { throw "Servidor nao subiu: $url (logs em $logs)" }
     }
-    Write-Host "Pronto. Voz: $Voz. Ouvido: $Ouvido. Modo: $Modo. Publico: $Publico (agente sombrear-$Publico)."
+    Write-Host "Pronto. Voz: $Voz. Ouvido: $Ouvido. Precos: $Precos. Modo: $Modo. Publico: $Publico (agente sombrear-$Publico)."
     Set-Location $pastaVoz
     # no console o LiveKit so grava o audio da ligacao com --record (sobe para o Dash e fica em conversas/)
     if ($Modo -eq "console") { uv run --group local equipe.py console --record }

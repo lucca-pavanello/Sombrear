@@ -46,6 +46,7 @@ from modelo import criar_llm
 
 load_dotenv(".env.local")
 
+# bancada: voz/orcamento/servidor.ts; no ar: https://<projeto>.supabase.co/functions/v1/orcamento-voz
 URL_ORCAMENTO = os.environ.get("URL_ORCAMENTO", "http://127.0.0.1:8791")
 URL_VOZ = os.environ.get("URL_VOZ", "http://127.0.0.1:8792/v1")  # local/servidor_voz.py
 # REACAO=0 desliga a reação curta na hora em que o cliente termina (reacao.py)
@@ -248,8 +249,12 @@ despedida é dita por ela, então NÃO fale a despedida antes de chamar.
 
 
 async def _chamar(caminho: str, corpo: dict | None = None) -> dict:
+    # no ar a calculadora é a função orcamento-voz (preço do banco na hora), com a mesma chave do
+    # registrar-ligacao; o servidor da bancada ignora o header
+    chave = os.environ.get("LIGACAO_SECRET", "")
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as s:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10),
+                                         headers={"x-chave": chave} if chave else None) as s:
             if corpo is None:
                 async with s.get(URL_ORCAMENTO + caminho) as r:
                     return await r.json()
@@ -257,6 +262,15 @@ async def _chamar(caminho: str, corpo: dict | None = None) -> dict:
                 return await r.json()
     except (aiohttp.ClientError, TimeoutError) as e:
         raise ToolError(f"Calculadora fora do ar ({type(e).__name__}). Não dê valor.") from e
+
+
+async def acordar_calculadora() -> None:
+    """No começo da ligação: a função do ar parada leva ~3,7 s na 1ª chamada e ~0,6 s depois
+    (medido em 21/10); assim a 1ª conta do cliente já pega ela acordada e com os preços lidos."""
+    try:
+        await _chamar("/tecidos?modelo=Rolo")
+    except ToolError:
+        pass
 
 
 def _opcional(valor: str | None, validos: set[str], padrao: str | None) -> str | None:
@@ -819,6 +833,7 @@ async def conversar(ctx: agents.JobContext) -> None:
         acompanhar_ligacao(ctx, session, agente)
     Vigia(session)
     asyncio.create_task(FALAS.preparar(session.tts, FALAS_FIXAS))
+    asyncio.create_task(acordar_calculadora())
     # fala fixa: o Muse recusa pedido sem mensagem de usuário, e assim a voz sai na hora
     await session.say(abertura(agora) if PUBLICO == "cliente" else "Oi, aqui é a Amanda. Em que posso ajudar?")
 
