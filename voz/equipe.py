@@ -43,6 +43,7 @@ from reacao import TODAS as REACOES, Reacoes, grupo, sem_reacao
 from sem_silencio import (FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia,
                           ESPERA, ESPERA_DEPOIS_DA_CONTA, com_espera, fala_calcular, sem_anuncio)
 from modelo import criar_llm
+from ouvido import PALAVRAS_DA_LOJA
 
 load_dotenv(".env.local")
 
@@ -205,9 +206,10 @@ A) Orçamento ou dúvida de produto (a maioria das ligações):
    no WhatsApp também?").
 5. Para o WhatsApp (foto ou orçamento), peça o nome (só o nome, não o completo) e o telefone com
    DDD, um de cada vez.
-   Confira o telefone repetindo os números em grupos ("dezessete, nove nove um dois três, quatro
-   cinco seis sete, isso?"). Aí chame anotar_contato e diga que o time vai te chamar no WhatsApp
-   nesse número, sem prometer quando (nada de "já já" ou "hoje").
+   Para conferir o telefone, chame conferir_telefone com os números que ele disse e fale o
+   "fale_assim" do resultado palavra por palavra, sem repetir os números de cabeça. Com o sim, chame
+   anotar_contato e diga que o time vai te chamar no WhatsApp nesse número, sem prometer quando
+   (nada de "já já" ou "hoje"). Se ele corrigir, chame conferir_telefone de novo com o número certo.
 
 B) Qualquer outro assunto (pedido já feito, entrega, instalação marcada, assistência, falar com
 alguém da loja, fornecedor): não tente resolver e não peça número de pedido, data de compra nem
@@ -301,6 +303,20 @@ def para_falar(r: dict) -> str:
     elif inst == "sob_consulta":
         frase += ", e a instalação a loja confirma"
     return frase + "."
+
+
+DIGITOS = ["zero", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove"]
+
+
+def telefone_falado(numeros: str) -> str:
+    """17996185177 -> "dezessete, nove nove seis um oito, cinco um sete sete": DDD por extenso e o
+    resto dígito a dígito, em dois grupos (5 + 4 no celular, 4 + 4 no fixo). Feito pelo código: na
+    ligação de 21/10 o modelo repetiu "nove nove seis um, oito cinco um, sete sete sete" para esse
+    número e o cliente disse "isso"."""
+    ddd, resto = numeros[:2], numeros[2:]
+    corte = len(resto) - 4
+    grupo = lambda g: " ".join(DIGITOS[int(d)] for d in g)  # noqa: E731
+    return f"{num2words(int(ddd), lang='pt_BR')}, {grupo(resto[:corte])}, {grupo(resto[corte:])}"
 
 
 def _resultado(r: dict) -> str:
@@ -455,7 +471,10 @@ def criar_ouvido() -> stt.STT:
         return elevenlabs.STT(model="scribe_v2_realtime", language_code="pt",
                               server_vad={"vad_silence_threshold_secs": float(os.environ.get("OUVIDO_SILENCIO", "0.5"))})
     if "/" in qual:  # pelo LiveKit Inference, na conta LiveKit que já existe (ex.: deepgram/nova-3)
-        return inference.STT(model=qual, language="pt")
+        # as palavras da loja (ouvido.py) como keyterm: no áudio da ligação de 21/10, "Perciano." e
+        # "Persiana Praçalo" viraram "Persiana, para sala." e "Persiana pra sala" (local/comparar_ouvidos.py)
+        extra = {"extra_kwargs": {"keyterm": PALAVRAS_DA_LOJA}} if qual.startswith("deepgram/") else {}
+        return inference.STT(model=qual, language="pt", **extra)
     return openai.STT(model="parakeet", language="pt", base_url=URL_VOZ, api_key="local", use_realtime=False)
 
 
@@ -536,6 +555,17 @@ class AmandaCliente(AmandaEquipe):
         # vai para o Dash quando a ligação terminar (ligacao.enviar): lead no CRM e mensagem no WhatsApp
         self.ligacao.anotar(nome, numeros, assunto, resumo, ambientes)
         return "anotado"
+
+    @function_tool()
+    async def conferir_telefone(self, context: RunContext, telefone: str) -> str:
+        """A frase para conferir o telefone com o cliente, montada pelo código. telefone com DDD, só
+        números (17991234567). Fale o fale_assim do resultado do jeito que veio."""
+        numeros = so_digitos(telefone)
+        if len(numeros) in (12, 13) and numeros.startswith("55"):
+            numeros = numeros[2:]
+        if len(numeros) not in (10, 11):
+            raise ToolError("Telefone incompleto: peça o número com DDD de novo.")
+        return json.dumps({"fale_assim": telefone_falado(numeros) + ", isso?"}, ensure_ascii=False)
 
     @function_tool()
     async def encerrar_ligacao(self, context: RunContext, despedida: str,
