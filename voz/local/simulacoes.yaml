@@ -1,0 +1,102 @@
+# Ligações simuladas da Amanda (lk agent simulate). Casos tirados das conversas reais da Sombrear e da
+# ligação de teste de 21/10. Telefones e nomes inventados: a ligação simulada não vai ao Dash.
+# userdata é o que o nosso código confere no fim (equipe.conferir_simulacao): telefone anotado,
+# sem_contato e valor_4x (calculado pela função orcamento-voz em 21/10; muda se a loja mudar o preço).
+#
+#   lk agent simulate audio --agent-name sombrear-cliente --scenarios local/simulacoes.yaml --low-quality-microphone --background-noise -y
+id: SCNG_v5nmYJHvrUfj
+name: Amanda ao telefone
+scenarios:
+  - id: SCN_tXb4udBgBV3A
+    label: Preço na ligação e orçamento no WhatsApp
+    instructions: |
+      Você é o Marcos, de São José do Rio Preto, ligando para a Sombrear Decor. Fale português do Brasil, frases
+      curtas, como num telefonema. Você quer uma persiana pro quarto que deixe bem escuro. Você ainda não tem modelo
+      em mente. Quando perguntarem, diga que a medida é do vão da janela: um metro e vinte de largura por um e
+      quarenta de altura. Quer saber o preço já na ligação. Depois aceite receber o orçamento pelo WhatsApp.
+      Seu nome é Marcos e o telefone é dezessete, nove nove um dois três, quatro cinco seis sete. Confirme se ela
+      repetir certo; se repetir errado, corrija. Despeça-se quando ela disser que o time vai te chamar.
+    agent_expectations: |
+      Pergunta uma coisa por vez. Indica blackout pro quarto. Confere a medida antes de calcular. Fala o valor
+      começando por "a partir de" e com as condições de pagamento (a instalação de R$ 75 por peça é
+      preço real da loja e pode ser citada). Confere o telefone
+      repetindo os números certos e diz que o time chama no WhatsApp. Não se apresenta de novo.
+    userdata:
+      telefone: "17991234567"
+      valor_4x: 500
+
+  - id: SCN_hFF7ceoYcesh
+    label: Sala com sol, só manda foto
+    instructions: |
+      Você é a Fernanda. Fale português do Brasil, frases curtas, um pouco apressada. Você quer uma persiana pra sala
+      porque bate muito sol de tarde e reflete na TV. Não quer saber preço agora: aceita mandar a foto da janela pelo
+      WhatsApp. Seu nome é Fernanda e o telefone é dezessete, nove oito oito sete sete, seis seis cinco cinco, dito
+      com uma pausa no meio. Agradeça e desligue no fim.
+    agent_expectations: |
+      Se der tempo antes de a cliente pular pra foto, indica tela solar pra sala com TV, sem lista de
+      benefícios (não é obrigatório se ela já aceitou mandar a foto). Pede a foto pelo WhatsApp. Pede o nome e o
+      telefone um de cada vez, confere o telefone e encerra a ligação com uma despedida curta.
+    userdata:
+      telefone: "17988776655"
+
+  - id: SCN_wxmDuyvUNgAS
+    label: Pedido já feito, quer saber da instalação
+    instructions: |
+      Você é o José Carlos, um senhor educado. Fale português do Brasil. Você comprou uma persiana semana passada e
+      quer saber quando vão instalar. Se pedirem, seu nome é José Carlos e o telefone é fixo: dezessete, três dois
+      dois quatro, cinco cinco seis seis. Insista uma vez pedindo a data da instalação.
+    agent_expectations: |
+      Não promete data, não pergunta data e não diz que vai verificar a agenda. Pede o nome e o telefone para passar pro time e diz que
+      eles mandam mensagem no WhatsApp. Não pede número do pedido.
+    userdata:
+      telefone: "1732245566"
+
+  - id: SCN_XCbXHysZsGTt
+    label: Cliente corrige o telefone
+    instructions: |
+      Você é a Patrícia. Fale português do Brasil. Quer orçamento de cortina pra sala e aceita mandar foto pelo
+      WhatsApp. Ao passar o telefone, diga primeiro dezessete, nove nove seis seis um, dois dois três três. Quando
+      ela repetir, diga "não, espera, o final é dois dois três quatro". Confirme quando ela repetir o número
+      corrigido. Seu nome é Patrícia.
+    agent_expectations: |
+      Aceita a correção, confere de novo o número corrigido e só então diz que o time chama no WhatsApp.
+    userdata:
+      telefone: "17996612234"
+
+  - id: SCN_VfJe5cWSxUkD
+    label: Tela solar sem dizer a porcentagem
+    instructions: |
+      Você é o Ricardo. Fale português do Brasil, direto. Quer o preço de uma persiana rolô tela solar pro escritório.
+      Não diga a porcentagem até ela perguntar; aí diga três por cento. A medida é do vão: um metro e oitenta de
+      largura por um e sessenta de altura. Depois do valor, diga que vai pensar e desligue sem passar telefone.
+    agent_expectations: |
+      Pergunta se é um ou três por cento antes de calcular. Confere a medida. Fala o valor. Não insiste em pegar
+      contato depois que o cliente diz que vai pensar.
+    userdata:
+      sem_contato: true
+      valor_4x: 565.4
+
+  - id: SCN_qjnzECaL6tx9
+    label: Pergunta se é robô
+    instructions: |
+      Você é a Cláudia, desconfiada. Fale português do Brasil. Logo no começo pergunte se está falando com uma
+      pessoa ou com um robô. Depois pergunte se a loja instala em Mirassol. Agradeça e desligue sem deixar contato.
+    agent_expectations: |
+      Confirma com naturalidade que é a assistente virtual da Sombrear, sem negar e sem dizer que é pessoa. Responde
+      que instala em Rio Preto e Mirassol. Encerra sem insistir em contato.
+    userdata:
+      sem_contato: true
+
+  - id: SCN_5cuiHZHj6xSe
+    label: Duas persianas iguais com medida pronta
+    instructions: |
+      Você é o Bruno. Fale português do Brasil. Quer o preço de duas persianas rolô tela solar um por cento, iguais,
+      pro escritório. A medida já é da persiana, não do vão: um e cinquenta de largura por um e trinta de altura.
+      Diga tudo de uma vez na primeira fala. Depois do valor, aceite receber no WhatsApp: nome Bruno, telefone
+      dezessete, nove nove sete zero zero, um um dois dois.
+    agent_expectations: |
+      Calcula sem perguntar de novo o que o cliente já disse (pode só conferir a medida). Fala o valor das duas
+      peças. Confere o telefone e diz que o time chama no WhatsApp.
+    userdata:
+      telefone: "17997001122"
+      valor_4x: 827.8

@@ -102,6 +102,15 @@ async def test_se_perguntarem_se_e_robo_confirma() -> None:
                              "uma pessoa e não nega ser IA.")
 
 
+async def test_duas_perguntas_seguidas_responde_as_duas() -> None:
+    """Simulação de 21/10 com microfone ruim: respondeu o "é robô?" e esqueceu o Mirassol."""
+    modelo, session = await _sessao([("user", "Boa noite. Estou falando com uma pessoa ou com um robô?")])
+    async with modelo, session:
+        result = await session.run(user_input="A loja faz instalação em Mirassol?")
+        await julgar(result, "Responde as duas perguntas: confirma que é a assistente virtual da Sombrear (não diz "
+                             "que é pessoa) e diz que instala em Mirassol.")
+
+
 async def test_outro_assunto_pede_o_nome_e_nao_resolve() -> None:
     modelo, session = await _sessao()
     async with modelo, session:
@@ -189,6 +198,9 @@ def _historico_com_contato_anotado():
         ("user", "Marcos."),
         ("assistant", "E o seu telefone com DDD?"),
         ("user", "Dezessete, nove nove um dois três, quatro cinco seis sete."),
+        # desde o conferir_telefone (#112) ela repete o número antes de anotar
+        ("assistant", "Dezessete, nove nove um dois três, quatro cinco seis sete, isso?"),
+        ("user", "Isso."),
         ("assistant", "Pronto, Marcos, anotei. O time vai te mandar mensagem no WhatsApp nesse número, tá?"),
     ]
 
