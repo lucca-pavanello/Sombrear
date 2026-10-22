@@ -13,7 +13,7 @@ import pytest
 from livekit.agents import AgentSession, llm as lk_llm
 
 from agenda import FUSO
-from equipe import URL_ORCAMENTO, AmandaCliente, abertura, telefone_falado
+from equipe import URL_ORCAMENTO, AmandaCliente, abertura, ela_se_despediu, telefone_falado
 from juiz import julgar
 from modelo import criar_llm
 
@@ -224,7 +224,8 @@ async def test_despedidas_em_loop_ela_desliga() -> None:
     modelo, session = await _sessao(historico)
     async with modelo, session:
         result = await session.run(user_input="Muito obrigado, tchau, até mais!")
-        assert _chamou(result, "encerrar_ligacao"), "ficou no loop de despedida"
+        falas = [e.item.text_content or "" for e in result.events if e.type == "message"]
+        assert _chamou(result, "encerrar_ligacao") or (falas and ela_se_despediu(falas[-1])),             f"ficou no loop de despedida: {falas}"
 
 
 async def test_nao_desliga_no_meio_de_uma_pergunta() -> None:
@@ -257,3 +258,29 @@ async def test_com_o_comodo_pergunta_se_ja_tem_modelo_em_mente() -> None:
         result = await session.run(user_input="Não, não sei qual.")
         await julgar(result, "Pergunta o que mais incomoda na sala (sol, claridade, privacidade) para achar o "
                              "modelo ideal. Uma pergunta só.")
+
+
+async def test_pergunta_e_tchau_na_mesma_fala_responde_e_encerra() -> None:
+    """Simulação de 22/10: respondeu o Mirassol e perguntou "persiana ou cortina?" depois do tchau."""
+    modelo, session = await _sessao()
+    async with modelo, session:
+        result = await session.run(user_input="Oi. Tô falando com uma pessoa ou com um robô? A loja instala "
+                                              "em Mirassol? Obrigada. Tchau.")
+        # desliga pela ferramenta ou pelo tchau no texto (acompanhar_ligacao derruba a linha do mesmo jeito)
+        falas = [e.item.text_content or "" for e in result.events if e.type == "message"]
+        assert _chamou(result, "encerrar_ligacao") or (falas and ela_se_despediu(falas[-1])),             f"não encerrou depois do tchau: {falas}"
+        await julgar(result, "Confirma que é a assistente virtual, responde que instala em Mirassol e se despede, "
+                             "sem fazer pergunta nova ao cliente.")
+
+
+async def test_vou_pensar_depois_do_valor_nao_pede_contato() -> None:
+    """Simulação de 22/10: "vou pensar, obrigado" e ela pediu o nome pra mandar no WhatsApp."""
+    modelo, session = await _sessao([
+        ("user", "Quanto fica uma rolô tela solar três por cento, um e oitenta por um e sessenta, do vão?"),
+        ("assistant", "Fica a partir de quinhentos e sessenta e cinco reais e quarenta centavos em até quatro "
+                      "vezes. Quer que eu te mande esse orçamento no WhatsApp também?"),
+    ])
+    async with modelo, session:
+        result = await session.run(user_input="Vou pensar. Obrigado.")
+        assert not _chamou(result, "anotar_contato")
+        await julgar(result, "Não pede nome nem telefone. Aceita com educação e se despede ou encerra.")
