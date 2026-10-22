@@ -91,6 +91,8 @@ class Ditado:
         if not esperando_telefone or not so_numero(texto) or not (digitos_falados(texto) or self.pedacos):
             self.pedacos = []
             return False
+        if completo(digitos_falados(texto)):
+            self.pedacos = []  # recomeçou e disse o número inteiro: "dezessete" ... "dezessete, nove nove..." (22/10)
         self.pedacos.append(texto.strip())
         return not completo(self.digitos)  # número inteiro: ela responde agora, com tudo junto
 

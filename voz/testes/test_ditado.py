@@ -40,6 +40,14 @@ def test_junta_os_pedacos_da_simulacao() -> None:
     assert not d.pedacos
 
 
+def test_recomeca_com_o_numero_inteiro() -> None:
+    """Simulação de 22/10: "Dezessete" e logo "Dezessete. Nove nove sete. Zero zero. Um um dois dois"."""
+    d = Ditado()
+    assert d.segurar("Dezessete", True)
+    assert not d.segurar("Dezessete. Nove nove sete. Zero zero. Um um dois dois", True)
+    assert digitos_falados(d.juntar()) == "17997001122"
+
+
 def test_nao_segura_fora_do_telefone_nem_pergunta() -> None:
     d = Ditado()
     assert not d.segurar("dezessete", False)
