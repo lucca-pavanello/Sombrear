@@ -284,3 +284,12 @@ async def test_vou_pensar_depois_do_valor_nao_pede_contato() -> None:
         result = await session.run(user_input="Vou pensar. Obrigado.")
         assert not _chamou(result, "anotar_contato")
         await julgar(result, "Não pede nome nem telefone. Aceita com educação e se despede ou encerra.")
+
+
+async def test_bom_dia_solto_e_depois_o_pedido_vai_direto() -> None:
+    """Simulação de 22/10: o "bom dia" chega num turno e o pedido no outro; ela abria com "Oi, tô aqui"."""
+    modelo, session = await _sessao([("user", "Bom dia.")])
+    async with modelo, session:
+        result = await session.run(user_input="Vocês podem me informar a data da instalação da minha persiana?")
+        falas = " ".join(e.item.text_content or "" for e in result.events if e.type == "message").lower()
+        assert "tô aqui" not in falas and "to aqui" not in falas, falas

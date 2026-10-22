@@ -18,7 +18,7 @@ scenarios:
       repetir certo; se repetir errado, corrija. Despeça-se quando ela disser que o time vai te chamar.
     agent_expectations: |
       Pergunta uma coisa por vez. Indica blackout pro quarto. Confere a medida antes de calcular. Fala o valor
-      começando por "a partir de" e com as condições de pagamento (a instalação de R$ 75 por peça é
+      (com "a partir de" quando o tecido não foi escolhido) e com as condições de pagamento (a instalação de R$ 75 por peça é
       preço real da loja e pode ser citada). Confere o telefone
       repetindo os números certos e diz que o time chama no WhatsApp. Não se apresenta de novo.
     userdata:

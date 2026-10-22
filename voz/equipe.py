@@ -160,8 +160,9 @@ uma pessoa da loja atende: direta, resolutiva, informal e boa de trato. Nada de 
 Agora é {DIAS[agora.weekday()]}, {agora:%d/%m/%Y %H:%M}. Você já disse: "{abertura(agora)}"
 Nunca se apresente nem cumprimente de novo. Se o cliente responder só com cumprimento ou "alô?" (ele
 ainda está chegando na ligação), NÃO devolva o "bom dia" nem o "boa tarde": diga que está ali e siga,
-ex.: "Oi, tô aqui. É sobre persiana ou cortina?". Se ele já disse o que quer, mesmo junto do
-"bom dia", vá direto ao assunto, sem "tô aqui".
+ex.: "Oi, tô aqui. É sobre persiana ou cortina?". O "tô aqui" é SÓ para fala sem nada além de
+cumprimento ou "alô?". Se a fala tem pergunta ou pedido ("Oi, quanto custa uma persiana?"), nunca
+comece com "tô aqui": vá direto ao assunto (simulação de 22/10: "Oi, tô aqui" em 4 de 7 ligações).
 
 Se perguntarem se você é robô, IA ou gravação: confirme com naturalidade, "Sou a assistente virtual
 da Sombrear, te atendo por aqui e o que precisar de mais detalhe eu passo pro time". É proibido negar
@@ -363,6 +364,7 @@ class AmandaEquipe(Agent):
             tools, model_settings = [], ModelSettings()
         elif model_settings.tool_choice not in (None, "auto") and is_given(model_settings.tool_choice):
             model_settings = ModelSettings()
+        chat_ctx = sem_cumprimento_solto(chat_ctx)
         resposta = sem_anuncio(Agent.default.llm_node(self, chat_ctx, tools, model_settings))
         if REACAO and _reage(chat_ctx):  # a reação rápida já saiu: a resposta não começa com outra
             resposta = sem_reacao(resposta)
@@ -831,6 +833,34 @@ def termina_em_pergunta(texto: str) -> bool:
 
 
 _TCHAU_DELA = re.compile(r"\b(tchau|até mais|até logo)\b", re.IGNORECASE)
+
+
+_CUMPRIMENTO = {"oi", "ola", "olá", "alo", "alô", "bom", "boa", "dia", "tarde", "noite", "tudo", "bem", "e", "ai", "aí"}
+
+
+def so_cumprimento(texto: str) -> bool:
+    palavras = re.findall(r"\w+", texto.lower())
+    return bool(palavras) and all(p in _CUMPRIMENTO for p in palavras)
+
+
+def sem_cumprimento_solto(chat_ctx: ChatContext) -> ChatContext:
+    """"Bom dia." num turno e o pedido no seguinte: o modelo respondia aos dois e abria com "Oi, tô
+    aqui" (simulação de 22/10, 4 de 7 ligações; a regra no prompt não segurou). O cumprimento que ficou
+    sem resposta antes do pedido sai do que o modelo lê."""
+    itens = chat_ctx.items
+    msgs = [i for i, m in enumerate(itens) if m.type == "message"]
+    if len(msgs) < 2 or itens[msgs[-1]].role != "user" or so_cumprimento(itens[msgs[-1]].text_content or ""):
+        return chat_ctx
+    tirar = []
+    for i in reversed(msgs[:-1]):
+        if itens[i].role != "user" or not so_cumprimento(itens[i].text_content or ""):
+            break
+        tirar.append(i)
+    if not tirar:
+        return chat_ctx
+    copia = chat_ctx.copy()
+    copia.items[:] = [m for i, m in enumerate(itens) if i not in tirar]
+    return copia
 
 
 def ela_se_despediu(texto: str) -> bool:
