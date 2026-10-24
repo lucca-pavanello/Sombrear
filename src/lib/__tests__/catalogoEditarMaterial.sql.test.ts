@@ -1,6 +1,7 @@
 /**
- * A migration 0034 (editar e excluir material do catálogo) num Postgres de
- * verdade em WebAssembly, em cima do mínimo das tabelas do catálogo.
+ * As migrations 0034 (editar e excluir material do catálogo) e 0035 (duplicar
+ * em outras cores) num Postgres de verdade em WebAssembly, em cima do mínimo
+ * das tabelas do catálogo.
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -9,6 +10,11 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 const MIGRATION = readFileSync(
   path.resolve(__dirname, '../../../supabase/migrations/0034_catalogo_editar_e_excluir_material.sql'),
+  'utf8'
+)
+
+const DUPLICAR = readFileSync(
+  path.resolve(__dirname, '../../../supabase/migrations/0035_catalogo_duplicar_em_cores.sql'),
   'utf8'
 )
 
@@ -31,7 +37,7 @@ const BASE = `
     id uuid primary key default gen_random_uuid(),
     fornecedor_id uuid references estoque_fornecedores(id),
     tipo text not null, referencia text not null, data_documento date,
-    tabela_preco text, categoria_cliente text,
+    tabela_preco text, categoria_cliente text, observacoes text,
     unique (fornecedor_id, referencia));
   create table catalogo_itens (
     id uuid primary key default gen_random_uuid(),
@@ -208,5 +214,67 @@ describe('catálogo: editar e excluir material (0034)', () => {
     await como(ADMIN)
     await expect(editar(alvos([{ fornecedor_id: null, codigo: null, descricao: 'NAO EXISTE' }]), 'X'))
       .rejects.toThrow(/Não achei/)
+  })
+})
+
+describe('catálogo: duplicar em outras cores (0035)', () => {
+  const variacoes = JSON.stringify([
+    { descricao: 'MICROFIBRA 3.00M BRANCO', cor: 'branco' },
+    { descricao: 'MICROFIBRA 3.00M CINZA', cor: 'cinza' },
+  ])
+  const material = alvos([
+    { fornecedor_id: CORTTEX, codigo: '6137', descricao: 'MICROFIBRA 3.00M BEGE' },
+    { fornecedor_id: TA_DECOR, codigo: null, descricao: 'MICROFIBRA 3.00M BEGE' },
+  ])
+
+  beforeEach(async () => {
+    await db.exec(MIGRATION)
+    await db.exec(DUPLICAR)
+    await como(ADMIN)
+  })
+
+  it('cria cada cor em cada loja, com o mesmo preço, sem código e sem tocar no pedido', async () => {
+    const r = await db.query<{ n: number }>(`select catalogo_duplicar_material($1::jsonb, $2::jsonb) as n`, [material, variacoes])
+    expect(r.rows[0].n).toBe(4)
+
+    const l = await db.query<Linha & { tipo: string; referencia: string; cor: string }>(
+      `select fornecedor, codigo_fornecedor, descricao, custo_unitario::text, tipo, referencia, cor
+         from catalogo_custo_vigente where descricao <> 'MICROFIBRA 3.00M BEGE' and descricao <> 'VOIL LINHO'
+        order by fornecedor, descricao`)
+    expect(l.rows.map(x => [x.fornecedor, x.descricao, x.codigo_fornecedor, x.custo_unitario, x.tipo, x.cor])).toEqual([
+      ['CORTTEX', 'MICROFIBRA 3.00M BRANCO', null, '6.300000', 'lista_manual', 'branco'],
+      ['CORTTEX', 'MICROFIBRA 3.00M CINZA', null, '6.300000', 'lista_manual', 'cinza'],
+      ['TA DECOR', 'MICROFIBRA 3.00M BRANCO', null, '7.100000', 'lista_manual', 'branco'],
+      ['TA DECOR', 'MICROFIBRA 3.00M CINZA', null, '7.100000', 'lista_manual', 'cinza'],
+    ])
+    // O mesmo documento manual do dia que a tela usaria (apelidoFornecedor)
+    expect(l.rows.find(x => x.fornecedor === 'TA DECOR')?.referencia).toMatch(/^MANUAL-TA-DECOR-\d{4}-\d{2}-\d{2}$/)
+
+    const pedido = await db.query(`select 1 from catalogo_itens i join catalogo_documentos d on d.id = i.documento_id
+                                    where d.referencia = 'CORTTEX-012897'`)
+    expect(pedido.rows).toHaveLength(1)
+  })
+
+  it('sem fornecedor vai para o mesmo documento de onde veio, e repetir não duplica', async () => {
+    const voil = alvos([{ fornecedor_id: null, codigo: null, descricao: 'VOIL LINHO' }])
+    const v = JSON.stringify([{ descricao: 'VOIL LINHO BRANCO', cor: null }])
+    expect((await db.query<{ n: number }>(`select catalogo_duplicar_material($1::jsonb, $2::jsonb) as n`, [voil, v])).rows[0].n).toBe(1)
+    expect((await db.query<{ n: number }>(`select catalogo_duplicar_material($1::jsonb, $2::jsonb) as n`, [voil, v])).rows[0].n).toBe(0)
+
+    const r = await db.query<{ referencia: string }>(
+      `select referencia from catalogo_custo_vigente where descricao = 'VOIL LINHO BRANCO'`)
+    expect(r.rows).toEqual([{ referencia: 'LISTA-DONA' }])
+  })
+
+  it('o apelido do banco é o mesmo da tela', async () => {
+    const r = await db.query<{ a: string }>(
+      `select catalogo_apelido_fornecedor('Tapeçaria Américana  Decor!') as a`)
+    expect(r.rows[0].a).toBe('TAPECARIA-AMERICANA-DECOR')
+  })
+
+  it('quem não é administrador não duplica', async () => {
+    await como(VENDEDORA)
+    await expect(db.query(`select catalogo_duplicar_material($1::jsonb, $2::jsonb)`, [material, variacoes]))
+      .rejects.toThrow(/administrador/)
   })
 })

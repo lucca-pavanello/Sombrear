@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, Loader2, Trash2 } from 'lucide-react'
+import { AlertTriangle, Loader2, Palette, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CustomSelect } from '@/components/ui/CustomSelect'
 import { useEditarMaterial, useExcluirMaterial } from '@/hooks/useCatalogoManual'
@@ -28,10 +28,12 @@ const rotulo = 'mb-1.5 block text-xs font-medium text-muted-foreground'
 interface Props {
   material: MaterialPivotado
   onFechar: () => void
+  /** Abre "Duplicar em outras cores" no lugar desta janela. */
+  onDuplicar: () => void
   toast: (type: ToastType, message: string) => void
 }
 
-export default function EditarMaterialModal({ material, onFechar, toast }: Props) {
+export default function EditarMaterialModal({ material, onFechar, onDuplicar, toast }: Props) {
   const editar = useEditarMaterial()
   const excluir = useExcluirMaterial()
   const celulas = [...material.porFornecedor.values()]
@@ -165,6 +167,15 @@ export default function EditarMaterialModal({ material, onFechar, toast }: Props
               </div>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={onDuplicar}
+            disabled={ocupado}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-brand/50 hover:text-brand"
+          >
+            <Palette className="h-4 w-4" /> Duplicar em outras cores
+          </button>
 
           {confirmandoExclusao && (
             <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">

@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { gravarCustoManual } from '@/lib/catalogo/gravarCusto'
 import type { CorrecaoCusto } from '@/lib/catalogo/manual'
 import type { AlvoMaterial } from '@/lib/catalogo/editarMaterial'
+import type { VariacaoCor } from '@/lib/catalogo/duplicarCores'
 
 /**
  * Escrita no catálogo de custos, para a tela. As leituras ficam em
@@ -73,6 +74,26 @@ export function useExcluirMaterial() {
   return useMutation({
     mutationFn: async (alvos: AlvoMaterial[]) => {
       const { data, error } = await supabase.rpc('catalogo_excluir_material', { p_alvos: alvos })
+      if (error) throw error
+      return data as number
+    },
+    onSuccess: () => invalidarCatalogo(qc),
+  })
+}
+
+/**
+ * O mesmo material, mesmo preço em cada loja, em outras cores (0035). Os
+ * nomes vêm prontos: a tela os mostrou à loja antes de salvar.
+ */
+export function useDuplicarMaterial() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (v: { alvos: AlvoMaterial[]; variacoes: VariacaoCor[] }) => {
+      const { data, error } = await supabase.rpc('catalogo_duplicar_material', {
+        p_alvos: v.alvos,
+        p_variacoes: v.variacoes,
+      })
       if (error) throw error
       return data as number
     },
