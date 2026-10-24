@@ -26,7 +26,7 @@ const SEM_LIGACAO = '__nenhum__'
 
 export default function LigarTecidosVenda({ toast }: { toast: (t: ToastType, m: string) => void }) {
   const { data: custos = [] } = useCustosVigentes()
-  const { porNome, tecidos } = useCustoTecidoCortina()
+  const { porNome, semLoja, tecidos } = useCustoTecidoCortina()
   const ligar = useLigarTecidoAoCatalogo()
   const [salvando, setSalvando] = useState<number | null>(null)
 
@@ -42,7 +42,7 @@ export default function LigarTecidosVenda({ toast }: { toast: (t: ToastType, m: 
     return [{ value: SEM_LIGACAO, label: 'Sem ligação' }, ...doCatalogo]
   }, [custos])
 
-  const ligados = tecidos.filter(t => porNome.has(t.nome)).length
+  const ligados = tecidos.filter(t => porNome.has(t.nome) || semLoja.has(t.nome)).length
 
   if (tecidos.length === 0) return null
 
@@ -114,6 +114,12 @@ export default function LigarTecidosVenda({ toast }: { toast: (t: ToastType, m: 
 
                 <div className="flex w-28 shrink-0 items-center justify-end gap-2">
                   {salvando === t.id && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                  {/* Ligado, mas a cortina só usa o custo da loja marcada. */}
+                  {!m && semLoja.has(t.nome) && (
+                    <span className="text-right text-xs text-amber-700 dark:text-amber-400">
+                      marque (✓) a loja
+                    </span>
+                  )}
                   {m && (
                     <span
                       className={cn(

@@ -18,6 +18,11 @@ const DUPLICAR = readFileSync(
   'utf8'
 )
 
+const LIGACAO_CORTINA = readFileSync(
+  path.resolve(__dirname, '../../../supabase/migrations/0036_catalogo_renomear_leva_ligacao_cortina.sql'),
+  'utf8'
+)
+
 const ADMIN = '00000000-0000-0000-0000-0000000000aa'
 const VENDEDORA = '00000000-0000-0000-0000-0000000000bb'
 const CORTTEX = '8267118c-be47-49ff-99a5-1834f0fdd775'
@@ -51,6 +56,7 @@ const BASE = `
     unidade_canonica text not null default 'm', quantidade_canonica numeric(12,3) not null default 1,
     custo_unitario numeric(12,6) not null,
     produto_id uuid references estoque_produtos(id), observacao text);
+  create table precos_cortina_tecidos (id serial primary key, nome text, catalogo_descricao text);
   create table catalogo_compra_escolhida (
     material_chave text primary key, fornecedor_id uuid, marcado_em timestamptz default now());
 
@@ -276,5 +282,26 @@ describe('catálogo: duplicar em outras cores (0035)', () => {
     await como(VENDEDORA)
     await expect(db.query(`select catalogo_duplicar_material($1::jsonb, $2::jsonb)`, [material, variacoes]))
       .rejects.toThrow(/administrador/)
+  })
+})
+
+describe('catálogo: renomear leva junto a ligação da cortina (0036)', () => {
+  it('a cortina continua achando o tecido depois de renomeado', async () => {
+    await db.exec(MIGRATION)
+    await db.exec(LIGACAO_CORTINA)
+    await db.query(`insert into precos_cortina_tecidos (nome, catalogo_descricao) values
+      ('Microfibra 90g (3,00m)', 'MICROFIBRA 3.00M BEGE'), ('Voil', 'VOIL LINHO')`)
+    await como(ADMIN)
+    await editar(alvos([
+      { fornecedor_id: CORTTEX, codigo: '6137', descricao: 'MICROFIBRA 3.00M BEGE' },
+      { fornecedor_id: TA_DECOR, codigo: null, descricao: 'MICROFIBRA 3.00M BEGE' },
+    ]), 'MICROFIBRA 90 grs 3.00 BEGE')
+
+    const r = await db.query<{ nome: string; catalogo_descricao: string }>(
+      `select nome, catalogo_descricao from precos_cortina_tecidos order by id`)
+    expect(r.rows).toEqual([
+      { nome: 'Microfibra 90g (3,00m)', catalogo_descricao: 'MICROFIBRA 90 grs 3.00 BEGE' },
+      { nome: 'Voil', catalogo_descricao: 'VOIL LINHO' },
+    ])
   })
 })
