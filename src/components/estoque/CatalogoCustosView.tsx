@@ -307,13 +307,17 @@ export default function CatalogoCustosView({ toast }: Props) {
         // às vezes é distração. A tela não escolhe por ninguém: mostra a
         // diferença e deixa a loja decidir de novo.
         const aviso = pagandoAMais(m, compraEscolhida?.get(m.chave))
+        // Só o fornecedor, a pedido da loja (24/10): "MANUAL-CORTTEX-…-2026-10-24"
+        // é a chave do banco, não informação para quem compra. O documento e a
+        // data continuam a um toque — no título da célula e no Histórico.
         return (
-          <div className="text-left text-xs">
-            <div className="text-foreground">{m.menor.referencia}</div>
-            <div className="text-muted-foreground">
-              {dataBr(m.menor.data_documento)}
-              {m.menor.tipo === 'lista_manual' && ' · informado pela loja'}
-            </div>
+          <div
+            className="text-left text-xs"
+            title={`${m.menor.referencia} · ${dataBr(m.menor.data_documento)}${
+              m.menor.tipo === 'lista_manual' ? ' · informado pela loja' : ''
+            }`}
+          >
+            <div className="text-foreground">{m.menor.fornecedor ?? 'Sem fornecedor'}</div>
             {aviso && (
               <div className="mt-1 flex items-start gap-1 text-amber-700 dark:text-amber-400">
                 <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
