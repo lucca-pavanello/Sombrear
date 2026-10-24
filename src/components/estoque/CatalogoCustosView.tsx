@@ -10,6 +10,7 @@ import EstoqueTable, { type EstoqueTableColumn } from './shared/EstoqueTable'
 import SectionCard from './shared/SectionCard'
 import CorrigirCustoModal from './CorrigirCustoModal'
 import EditarMaterialModal from './EditarMaterialModal'
+import DuplicarCoresModal from './DuplicarCoresModal'
 import LigarTecidosVenda from './LigarTecidosVenda'
 import { tbl } from './shared/tableStyles'
 import {
@@ -91,6 +92,7 @@ export default function CatalogoCustosView({ toast }: Props) {
   const [edicao, setEdicao] = useState<Edicao | null>(null)
   const [novaLoja, setNovaLoja] = useState(false)
   const [materialEditado, setMaterialEditado] = useState<MaterialPivotado | null>(null)
+  const [materialDuplicado, setMaterialDuplicado] = useState<MaterialPivotado | null>(null)
 
   const { data: colunasLoja } = useColunasFornecedor(grupo)
   const { data: compraEscolhida } = useCompraEscolhida()
@@ -549,6 +551,18 @@ export default function CatalogoCustosView({ toast }: Props) {
         <EditarMaterialModal
           material={materialEditado}
           onFechar={() => setMaterialEditado(null)}
+          onDuplicar={() => {
+            setMaterialDuplicado(materialEditado)
+            setMaterialEditado(null)
+          }}
+          toast={toast}
+        />
+      )}
+
+      {materialDuplicado && (
+        <DuplicarCoresModal
+          material={materialDuplicado}
+          onFechar={() => setMaterialDuplicado(null)}
           toast={toast}
         />
       )}
