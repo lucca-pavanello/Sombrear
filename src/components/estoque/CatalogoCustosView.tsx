@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   Search, Scissors, Wrench, ChevronRight, FileText, Package,
-  Truck, CircleHelp, Receipt, Plus, Check, Store, TriangleAlert,
+  Truck, CircleHelp, Receipt, Plus, Check, Store, TriangleAlert, Pencil,
 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { CustomSelect } from '@/components/ui/CustomSelect'
@@ -9,6 +9,7 @@ import KpiCard from '@/components/shared/KpiCard'
 import EstoqueTable, { type EstoqueTableColumn } from './shared/EstoqueTable'
 import SectionCard from './shared/SectionCard'
 import CorrigirCustoModal from './CorrigirCustoModal'
+import EditarMaterialModal from './EditarMaterialModal'
 import LigarTecidosVenda from './LigarTecidosVenda'
 import { tbl } from './shared/tableStyles'
 import {
@@ -89,6 +90,7 @@ export default function CatalogoCustosView({ toast }: Props) {
   const [aberto, setAberto] = useState<CustoVigente | null>(null)
   const [edicao, setEdicao] = useState<Edicao | null>(null)
   const [novaLoja, setNovaLoja] = useState(false)
+  const [materialEditado, setMaterialEditado] = useState<MaterialPivotado | null>(null)
 
   const { data: colunasLoja } = useColunasFornecedor(grupo)
   const { data: compraEscolhida } = useCompraEscolhida()
@@ -163,16 +165,26 @@ export default function CatalogoCustosView({ toast }: Props) {
       key: 'produto',
       header: 'Produto',
       align: 'left',
+      // O nome abre a edição do material inteiro (todas as lojas); o preço
+      // de cada loja continua abrindo a correção de custo.
       cell: m => (
-        <div className="text-left">
-          <div className="font-medium text-foreground">{m.descricao}</div>
+        <button
+          type="button"
+          onClick={() => setMaterialEditado(m)}
+          title="Editar ou excluir este material"
+          className="group -mx-2 -my-1 rounded-lg px-2 py-1 text-left transition-colors hover:bg-muted/60"
+        >
+          <div className="flex items-center gap-1.5 font-medium text-foreground">
+            {m.descricao}
+            <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-brand" />
+          </div>
           <div className="text-xs text-muted-foreground">
             {ROTULO_CATEGORIA[m.categoria]}
             {m.cor && ` · ${m.cor}`}
             {m.largura_m && ` · ${m.largura_m.toFixed(2).replace('.', ',')} m`}
             {` · por ${rotuloUnidade(m.unidade_canonica)}`}
           </div>
-        </div>
+        </button>
       ),
     },
 
@@ -529,6 +541,14 @@ export default function CatalogoCustosView({ toast }: Props) {
           jaSaoColuna={lojas.map(l => l.id).filter(id => id !== SEM_FORNECEDOR)}
           rotuloGrupo={GRUPO_INFO[grupo].rotulo}
           onFechar={() => setNovaLoja(false)}
+          toast={toast}
+        />
+      )}
+
+      {materialEditado && (
+        <EditarMaterialModal
+          material={materialEditado}
+          onFechar={() => setMaterialEditado(null)}
           toast={toast}
         />
       )}

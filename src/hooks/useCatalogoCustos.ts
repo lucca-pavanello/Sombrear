@@ -143,28 +143,43 @@ export function useHistoricoCusto(item: CustoVigente | null) {
     enabled: !!item,
     queryFn: async (): Promise<OcorrenciaCusto[]> => {
       if (!item) return []
+      // Lê a base JÁ AJUSTADA (0044): depois de a loja renomear o material, o
+      // pedido antigo ainda diz o nome velho no papel, mas é o mesmo produto
+      // — e o histórico precisa mostrar os dois.
       let q = supabase
-        .from('catalogo_itens')
+        .from('catalogo_itens_efetivos')
         .select(
           'id, descricao, codigo_fornecedor, quantidade_documento, unidade_documento,' +
             'preco_bruto, desconto_pct, preco_liquido, custo_unitario, unidade_canonica, observacao,' +
-            'catalogo_documentos!inner(referencia, tipo, data_documento, tabela_preco,' +
-            'categoria_cliente, estoque_fornecedores(nome))'
+            'referencia, tipo, data_documento, tabela_preco, categoria_cliente, fornecedor'
         )
-        .eq('catalogo_documentos.fornecedor_id', item.fornecedor_id)
 
+      q = item.fornecedor_id ? q.eq('fornecedor_id', item.fornecedor_id) : q.is('fornecedor_id', null)
       q = item.codigo_fornecedor
         ? q.eq('codigo_fornecedor', item.codigo_fornecedor)
         : q.eq('descricao', item.descricao)
 
-      const { data, error } = await q
+      const { data: planas, error } = await q
       if (error) throw error
+      const data = (planas ?? []).map(r => {
+        const l = r as unknown as Record<string, unknown>
+        return {
+          ...l,
+          catalogo_documentos: {
+            referencia: l.referencia,
+            tipo: l.tipo,
+            data_documento: l.data_documento,
+            tabela_preco: l.tabela_preco,
+            categoria_cliente: l.categoria_cliente,
+            estoque_fornecedores: l.fornecedor ? { nome: l.fornecedor } : null,
+          },
+        }
+      })
 
-      // Ordena aqui, não no PostgREST: `catalogo_documentos` é uma relação
-      // para-um, e `referencedTable` ordena DENTRO de uma lista embutida —
-      // não serve para ordenar as linhas de fora por uma coluna de lá. São
-      // poucas ocorrências por produto; ordenar no cliente é exato e barato.
-      const linhas = (data ?? []) as unknown as OcorrenciaCusto[]
+      // A tela já lê o formato antigo (documento embutido); montar esse
+      // formato aqui poupa mexer no painel. São poucas ocorrências por
+      // produto; ordenar no cliente é exato e barato.
+      const linhas = data as unknown as OcorrenciaCusto[]
       return linhas
         .slice()
         .sort((a, b) =>

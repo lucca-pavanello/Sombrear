@@ -123,10 +123,10 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
       onClick={onFechar}
     >
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white shadow-xl dark:bg-card sm:rounded-2xl"
+        className="flex max-h-[90dvh] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-xl dark:bg-card sm:rounded-2xl"
         onClick={e => e.stopPropagation()}
       >
-        <div className="border-b border-border px-5 py-4">
+        <div className="shrink-0 border-b border-border px-5 py-4">
           <h3 className="font-semibold text-foreground">
             {editando ? 'Corrigir custo' : preenchendo ? 'Custo na outra loja' : 'Novo material'}
           </h3>
@@ -139,7 +139,7 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
           </p>
         </div>
 
-        <div className="space-y-4 px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <div>
             <label className={rotulo}>Fornecedor</label>
             <CustomSelect
@@ -167,6 +167,11 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
               className={campo}
               readOnly={editando || preenchendo}
             />
+            {(editando || preenchendo) && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Para mudar o nome, toque no nome do material na lista — muda em todas as lojas.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -220,7 +225,11 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
               <label className={rotulo}>Custo</label>
               <input
                 value={custo}
-                onChange={e => setCusto(e.target.value)}
+                onChange={e => {
+                  setCusto(e.target.value)
+                  // Valor novo, aviso novo: o "salvar mesmo assim" era para o outro número.
+                  setConfirmando(null)
+                }}
                 placeholder="0,00"
                 className={cn(campo, 'tabular-nums')}
                 inputMode="decimal"
@@ -257,16 +266,9 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
           {confirmando && (
             <div className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50/60 p-3 text-sm dark:border-amber-800/40 dark:bg-amber-950/20">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-              <div>
-                <p className="text-amber-900 dark:text-amber-200">{confirmando}</p>
-                <button
-                  type="button"
-                  onClick={() => void enviar(true)}
-                  className="mt-2 text-xs font-semibold text-amber-900 underline dark:text-amber-200"
-                >
-                  É isso mesmo, salvar assim
-                </button>
-              </div>
+              <p className="text-amber-900 dark:text-amber-200">
+                {confirmando} Se estiver certo, toque em “Salvar mesmo assim”.
+              </p>
             </div>
           )}
 
@@ -277,7 +279,9 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+        {/* Fora da área que rola: no celular, com o formulário comprido, o
+            botão ficava abaixo da dobra e parecia que não havia como salvar. */}
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-5 py-3">
           <button
             type="button"
             onClick={onFechar}
@@ -287,12 +291,14 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
           </button>
           <button
             type="button"
-            onClick={() => void enviar()}
+            onClick={() => void enviar(!!confirmando)}
             disabled={salvar.isPending}
             className="inline-flex items-center gap-2 rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-brand transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
           >
             {salvar.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            {editando ? 'Salvar correção' : preenchendo ? 'Salvar custo' : 'Cadastrar'}
+            {confirmando
+              ? 'Salvar mesmo assim'
+              : editando ? 'Salvar correção' : preenchendo ? 'Salvar custo' : 'Cadastrar'}
           </button>
         </div>
       </div>
