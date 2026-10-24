@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  chaveMaterial, pivotarPorFornecedor, ordenar, lojasDe, pagandoAMais, SEM_FORNECEDOR,
+  chaveMaterial, pivotarPorFornecedor, ordenar, lojasDe, pagandoAMais, SEM_FORNECEDOR, custoDaLojaMarcada,
 } from '../catalogo/pivo'
 import type { CustoVigente } from '@/hooks/useCatalogoCustos'
 
@@ -232,5 +232,40 @@ describe('comprei aqui x mais barato', () => {
     // de uma marcação feita para organizar a compra.
     expect(material.menor!.custo_unitario).toBe(14.9)
     expect(material.menor!.fornecedor_id).toBe(CORTTEX)
+  })
+})
+
+describe('custoDaLojaMarcada — a cortina usa só a loja ticada (Stella, 24/10)', () => {
+  const [material] = pivotarPorFornecedor([
+    custo({ descricao: 'LINHO GAZE 3.00M BEGE', fornecedor_id: CORTTEX, custo_unitario: 11 }),
+    custo({ descricao: 'LINHO GAZE 3.00M BEGE', fornecedor_id: TA_DECOR, custo_unitario: 13.35 }),
+  ])
+
+  it('marcada na mais cara: vale a mais cara, não o menor', () => {
+    expect(custoDaLojaMarcada(material, TA_DECOR)?.custo_unitario).toBe(13.35)
+  })
+
+  it('sem marca: sem custo, em vez de chutar o menor', () => {
+    expect(custoDaLojaMarcada(material, undefined)).toBeNull()
+  })
+
+  it('marcada numa loja sem preço deste material: sem custo', () => {
+    expect(custoDaLojaMarcada(material, ALUMITEC)).toBeNull()
+  })
+})
+
+describe('ordenar por tipo — a ordem da loja para tecidos (Stella, 24/10)', () => {
+  it('linhos, depois microfibra/oxford, depois semi blackout, depois blackout 100%', () => {
+    const nomes = [
+      'BLACKOUT LISO 2,80M BRANCO', 'SEMI BLACKOUT 3.00 BRANCO', 'Oxford', 'Natural Look 2865',
+      'MICROFIBRA 90 grs 3.00 BEGE', 'LINHO GAZE 3.30 BEGE', 'LINHO GAZE 3.00M BEGE', 'Blact 100%',
+    ]
+    const linhas = pivotarPorFornecedor(nomes.map(d => custo({ descricao: d, fornecedor_id: CORTTEX, custo_unitario: 10 })))
+    expect(ordenar(linhas, 'tipo').map(m => m.descricao)).toEqual([
+      'LINHO GAZE 3.00M BEGE', 'LINHO GAZE 3.30 BEGE', 'Natural Look 2865',
+      'MICROFIBRA 90 grs 3.00 BEGE', 'Oxford',
+      'SEMI BLACKOUT 3.00 BRANCO',
+      'BLACKOUT LISO 2,80M BRANCO', 'Blact 100%',
+    ])
   })
 })

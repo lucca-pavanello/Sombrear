@@ -119,12 +119,37 @@ function unidadePredominante(itens: CustoVigente[]): string {
   return [...contagem.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]
 }
 
-export type Ordem = 'nome' | 'menor_custo' | 'maior_custo'
+export type Ordem = 'tipo' | 'nome' | 'menor_custo' | 'maior_custo'
 
 export const ROTULO_ORDEM: Record<Ordem, string> = {
+  tipo: 'Por tipo',
   nome: 'Nome (A–Z)',
   menor_custo: 'Custo: do mais barato',
   maior_custo: 'Custo: do mais caro',
+}
+
+/**
+ * A ordem em que a loja pensa os tecidos (Stella, 24/10): "linhos, depois
+ * forro micro/oxford, depois semi bk e depois bk 100%". Natural Look é a gaze
+ * de linho cru, então anda com os linhos. Semi blackout vem ANTES do teste de
+ * blackout, senão cairia junto com o 100%.
+ */
+const FAMILIAS_TECIDO: [RegExp, number][] = [
+  [/\b(linho|gaze|natural look|voil|flame)\b/, 1],
+  [/\b(microfibra|oxford)\b/, 2],
+  [/\bsemi\s*(blackout|blact|bk)\b/, 3],
+  [/\b(blackout|blact|bk)\b/, 4],
+]
+
+export function familiaDoTecido(descricao: string): number {
+  const k = chaveMaterial(descricao)
+  for (const [re, n] of FAMILIAS_TECIDO) if (re.test(k)) return n
+  return 5
+}
+
+/** Tecido pela família da loja; acessório pela categoria (trilho junto de trilho). */
+function chaveDeTipo(m: MaterialPivotado): string {
+  return m.categoria === 'tecido' ? `0${familiaDoTecido(m.descricao)}` : `1${m.categoria}`
 }
 
 /**
@@ -134,6 +159,10 @@ export const ROTULO_ORDEM: Record<Ordem, string> = {
 export function ordenar(linhas: MaterialPivotado[], ordem: Ordem): MaterialPivotado[] {
   return linhas.slice().sort((a, b) => {
     if (ordem === 'nome') return a.descricao.localeCompare(b.descricao, 'pt-BR')
+    // Dentro do tipo, pelo nome: larguras e cores do mesmo tecido ficam juntas.
+    if (ordem === 'tipo') {
+      return chaveDeTipo(a).localeCompare(chaveDeTipo(b)) || a.descricao.localeCompare(b.descricao, 'pt-BR')
+    }
     if (a.menor == null || b.menor == null) {
       if (a.menor == null && b.menor == null) return a.descricao.localeCompare(b.descricao, 'pt-BR')
       return a.menor == null ? 1 : -1
@@ -201,4 +230,17 @@ export function pagandoAMais(
   if (escolhido.unidade_canonica !== m.menor.unidade_canonica) return null
   const diferenca = escolhido.custo_unitario - m.menor.custo_unitario
   return diferenca > 0 ? { diferenca, escolhido, menor: m.menor } : null
+}
+
+/**
+ * O custo que a cortina usa: o da loja marcada. Sem marca, ou marcada numa
+ * loja que não tem preço daquele material, não há custo — e a tela pede a
+ * marca em vez de chutar o menor.
+ */
+export function custoDaLojaMarcada(
+  material: MaterialPivotado,
+  lojaMarcada: string | undefined
+): CustoVigente | null {
+  if (lojaMarcada === undefined) return null
+  return material.porFornecedor.get(lojaMarcada) ?? null
 }

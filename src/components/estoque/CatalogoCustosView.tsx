@@ -87,7 +87,7 @@ export default function CatalogoCustosView({ toast }: Props) {
   const [busca, setBusca] = useState('')
   const [categoria, setCategoria] = useState('all')
   const [fornecedor, setFornecedor] = useState('all')
-  const [ordem, setOrdem] = useState<Ordem>('menor_custo')
+  const [ordem, setOrdem] = useState<Ordem>('tipo')
   const [aberto, setAberto] = useState<CustoVigente | null>(null)
   const [edicao, setEdicao] = useState<Edicao | null>(null)
   const [novaLoja, setNovaLoja] = useState(false)
