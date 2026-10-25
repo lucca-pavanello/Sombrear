@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { AlertTriangle, Loader2, Trash2 } from 'lucide-react'
 import { cn, formatCurrency } from '@/lib/utils'
 import { CustomSelect } from '@/components/ui/CustomSelect'
-import { useSalvarCustoManual, useFornecedoresCatalogo } from '@/hooks/useCatalogoManual'
+import { useSalvarCustoManual, useFornecedoresCatalogo, useExcluirMaterial } from '@/hooks/useCatalogoManual'
 import { validarCorrecao, mudancaSuspeita } from '@/lib/catalogo/manual'
 import { ROTULO_CATEGORIA, rotuloUnidade, type CustoVigente, type CategoriaCatalogo } from '@/hooks/useCatalogoCustos'
 import type { ToastType } from '@/hooks/useToast'
@@ -50,6 +50,7 @@ interface Props {
 export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }: Props) {
   const { data: fornecedores = [] } = useFornecedoresCatalogo()
   const salvar = useSalvarCustoManual()
+  const tirar = useExcluirMaterial()
 
   const preenchendo = !!item && !!trocarPara
   const editando = !!item && !preenchendo
@@ -64,6 +65,7 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState<string | null>(null)
   const [confirmando, setConfirmando] = useState<string | null>(null)
+  const [tirando, setTirando] = useState(false)
 
   const custoNum = Number(custo.replace(',', '.'))
   const fornecedorNome = fornecedores.find(f => f.id === fornecedorId)?.nome ?? ''
@@ -81,6 +83,12 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
       custoUnitario: custoNum,
       unidadeCanonica: unidade as 'm' | 'm2' | 'un' | 'kg',
       motivo: motivo.trim() || null,
+    }
+
+    // Zero não é "não vende": custo zero entraria no cálculo como material de graça.
+    if (editando && custoNum === 0) {
+      setErro('Se esta loja não vende este material, use “Tirar desta loja”, aqui embaixo.')
+      return
     }
 
     const problema = validarCorrecao(correcao)
@@ -114,6 +122,26 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
       onFechar()
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Não deu para salvar.')
+    }
+  }
+
+  /**
+   * "Esta loja não tem este material." Zerar o custo não é a resposta: custo
+   * zero entraria no cálculo como material de graça. Tirar o preço desta loja
+   * deixa a célula vazia, como se ela nunca tivesse informado — e as outras
+   * lojas continuam como estão. O documento fica guardado (0034).
+   */
+  async function tirarDestaLoja() {
+    if (!item) return
+    setErro(null)
+    try {
+      await tirar.mutateAsync([
+        { fornecedor_id: item.fornecedor_id, codigo: item.codigo_fornecedor, descricao: item.descricao },
+      ])
+      toast('success', `${item.descricao} saiu de ${item.fornecedor ?? 'Sem fornecedor'}.`)
+      onFechar()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Não deu para tirar o preço.')
     }
   }
 
@@ -272,6 +300,16 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
             </div>
           )}
 
+          {tirando && item && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+              <p className="text-foreground">
+                O preço de <b>{item.fornecedor ?? 'Sem fornecedor'}</b> sai deste material e a célula
+                fica vazia. As outras lojas continuam como estão.
+              </p>
+            </div>
+          )}
+
           {erro && (
             <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
               {erro}
@@ -282,24 +320,58 @@ export default function CorrigirCustoModal({ item, trocarPara, onFechar, toast }
         {/* Fora da área que rola: no celular, com o formulário comprido, o
             botão ficava abaixo da dobra e parecia que não havia como salvar. */}
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-5 py-3">
-          <button
-            type="button"
-            onClick={onFechar}
-            className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={() => void enviar(!!confirmando)}
-            disabled={salvar.isPending}
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-brand transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
-          >
-            {salvar.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            {confirmando
-              ? 'Salvar mesmo assim'
-              : editando ? 'Salvar correção' : preenchendo ? 'Salvar custo' : 'Cadastrar'}
-          </button>
+          {editando && tirando ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setTirando(false)}
+                disabled={tirar.isPending}
+                className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={() => void tirarDestaLoja()}
+                disabled={tirar.isPending}
+                className="inline-flex items-center gap-2 rounded-xl bg-destructive px-4 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
+              >
+                {tirar.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Tirar preço
+              </button>
+            </>
+          ) : (
+            <>
+              {editando && (
+                <button
+                  type="button"
+                  onClick={() => setTirando(true)}
+                  className="mr-auto inline-flex items-center gap-1.5 rounded-xl px-2 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
+                  title="Esta loja não vende este material"
+                >
+                  <Trash2 className="h-4 w-4" /> Tirar desta loja
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onFechar}
+                className="rounded-xl border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void enviar(!!confirmando)}
+                disabled={salvar.isPending}
+                className="inline-flex items-center gap-2 rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-brand transition-all hover:opacity-90 active:scale-95 disabled:opacity-60"
+              >
+                {salvar.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                {confirmando
+                  ? 'Salvar mesmo assim'
+                  : editando ? 'Salvar correção' : preenchendo ? 'Salvar custo' : 'Cadastrar'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
