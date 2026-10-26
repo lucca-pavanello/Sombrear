@@ -28,6 +28,18 @@ import { campo, rotulo, segmentado } from '@/components/shared/estilos'
 
 const CalculadoraCortina = lazyComRecarga(() => import('@/components/cortina/CalculadoraCortina'))
 
+/** Roda no máximo `max` tarefas ao mesmo tempo; o resto espera a vez.
+    Cada cálculo faz ~13 consultas no banco — 15 de uma vez derrubam o servidor. */
+function criarFila(max: number) {
+  let ativos = 0
+  const espera: (() => void)[] = []
+  return async (tarefa: () => Promise<void>) => {
+    if (ativos >= max) await new Promise<void>(r => espera.push(r))
+    ativos++
+    try { await tarefa() } finally { ativos--; espera.shift()?.() }
+  }
+}
+
 const brl = (v: number) => `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 const MODELOS = [
@@ -174,6 +186,8 @@ export default function TabSimulador({ modoVenda, aoSalvar }: {
      medidas EXTRAS do mesmo produto, calculadas e salvas junto. */
   const [extras, setExtras] = useState<{
     id: number; largura: string; altura: string; qtd: string; amb: string; resultado: Resultado | null
+    /** a entrada (serializada) que gerou o `resultado` — se a linha ou o topo mudou, o resultado não vale mais */
+    calcChave: string | null
     /** null = mesmo produto do topo; preenchido quando alguém clica em "trocar modelo" na linha */
     prod: Prod | null
   }[]>([])
@@ -293,49 +307,88 @@ export default function TabSimulador({ modoVenda, aoSalvar }: {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [entrada, pronto])
 
-  /* ── medidas extras: mesmo produto, outros tamanhos ── */
+  /* ── medidas extras: mesmo produto, outros tamanhos ──
+     Venda de apartamento inteiro chega a 15 medidas (vídeo da Stella, 26/10).
+     Antes, cada tecla recalculava TODAS de uma vez: 15 chamadas simultâneas,
+     a cada tecla, num banco pequeno — as que falhavam viravam "Calculando…"
+     pra sempre, sem erro nem jeito de refazer. Agora cada medida guarda a
+     entrada que gerou o seu resultado (`calcChave`), só a que mudou volta pro
+     servidor, no máximo 3 por vez, e erro aparece como erro. */
   // a chave ignora o resultado de propósito: depender dele criaria loop
   const extrasChave = JSON.stringify(extras.map(x => [x.id, x.largura, x.altura, x.qtd, x.prod]))
   /** medida com tamanho preenchido — entra na venda (e trava o salvar enquanto não calcula) */
   const extraValida = (x: (typeof extras)[number]) => temMedida(x.prod ?? prodTopo, num(x.largura), num(x.altura))
+  /** a entrada que o motor recebe pra esta medida — serializada, é a "assinatura" do resultado */
+  const chaveDaExtra = (x: (typeof extras)[number], base = entrada) => JSON.stringify({
+    ...base,
+    ...(x.prod ? camposProd(x.prod) : {}),
+    largura: num(x.largura), altura: num(x.altura),
+    quantidade: Math.max(1, Math.round(num(x.qtd))),
+    // o bandô de peça única vale UMA vez por venda — vai só na linha principal
+    bandoLargura: undefined, bandoQuantidade: undefined,
+  })
+  const extraEmDia = (x: (typeof extras)[number]) => x.resultado != null && x.calcChave === chaveDaExtra(x)
+  // a resposta chega depois; ela compara com o topo de AGORA, não com o da hora que saiu
+  const entradaRef = useRef(entrada)
+  entradaRef.current = entrada
+  /** id da medida → chave que está no servidor agora (não dispara de novo a mesma conta) */
+  const extrasEmVooRef = useRef(new Map<number, string>())
+  const filaExtrasRef = useRef(criarFila(3))
+  const [tentativaExtras, setTentativaExtras] = useState(0)
   const extrasDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     setSalvoAtual(false)
     setValorCobrado('')
     if (extrasDebounceRef.current) clearTimeout(extrasDebounceRef.current)
-    extrasDebounceRef.current = setTimeout(async () => {
-      const alvos = extras.filter(x => extraValida(x) && prodCompleto(x.prod ?? prodTopo))
-      if (alvos.length === 0) return
-      const respostas = await Promise.all(alvos.map(async x => {
-        try {
-          const { data, error } = await supabase.functions.invoke('simular', {
-            body: { acao: 'calcular', entrada: {
-              ...entrada,
-              ...(x.prod ? camposProd(x.prod) : {}),
-              largura: num(x.largura), altura: num(x.altura),
-              quantidade: Math.max(1, Math.round(num(x.qtd))),
-              // o bandô de peça única vale UMA vez por venda — vai só na linha principal
-              bandoLargura: undefined, bandoQuantidade: undefined,
-            } },
-          })
-          if (error) throw error
-          return { id: x.id, resultado: data as Resultado }
-        } catch {
-          return { id: x.id, resultado: { erro: 'Não consegui calcular esta medida.' } as Resultado }
-        }
-      }))
-      setExtras(prev => prev.map(x => {
-        const r = respostas.find(y => y.id === x.id)
-        return r ? { ...x, resultado: r.resultado } : x
-      }))
+    extrasDebounceRef.current = setTimeout(() => {
+      const emVoo = extrasEmVooRef.current
+      const alvos = extras.filter(x => extraValida(x) && prodCompleto(x.prod ?? prodTopo) && !extraEmDia(x))
+      for (const x of alvos) {
+        const chave = chaveDaExtra(x)
+        if (emVoo.get(x.id) === chave) continue
+        emVoo.set(x.id, chave)
+        void filaExtrasRef.current(async () => {
+          // na fila, a medida pode ter mudado de novo — essa conta já não interessa
+          if (emVoo.get(x.id) !== chave) return
+          const resultado = await calcularExtra(chave)
+          if (emVoo.get(x.id) !== chave) return
+          emVoo.delete(x.id)
+          setExtras(prev => prev.map(y =>
+            y.id === x.id && chaveDaExtra(y, entradaRef.current) === chave ? { ...y, resultado, calcChave: chave } : y))
+        })
+      }
     }, 500)
     return () => { if (extrasDebounceRef.current) clearTimeout(extrasDebounceRef.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extrasChave, entrada])
+  }, [extrasChave, entrada, tentativaExtras])
+
+  /** Uma medida no servidor. Falha de rede/servidor tenta mais uma vez;
+      recusa do motor (`erro` com 200) é resposta, não falha. */
+  async function calcularExtra(chave: string): Promise<Resultado> {
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      try {
+        const { data, error } = await supabase.functions.invoke('simular', {
+          body: { acao: 'calcular', entrada: JSON.parse(chave) },
+        })
+        if (error) throw error
+        return data as Resultado
+      } catch {
+        if (tentativa === 0) await new Promise(r => setTimeout(r, 1000))
+      }
+    }
+    return { erro: 'Não consegui calcular esta medida.' } as Resultado
+  }
 
   const extrasValidas = extras.filter(extraValida)
-  const extrasOk = extrasValidas.filter(x => x.resultado && !x.resultado.erro)
+  const extrasOk = extrasValidas.filter(x => extraEmDia(x) && !x.resultado!.erro)
+  const extrasComErro = extrasValidas.filter(x => extraEmDia(x) && x.resultado!.erro)
+  const extrasCalculando = extrasValidas.length - extrasOk.length - extrasComErro.length
   const extrasPendentes = extrasValidas.length !== extrasOk.length
+  /** joga fora o erro das que falharam — o efeito vê que estão vencidas e calcula de novo */
+  function recalcularExtrasComErro() {
+    setExtras(p => p.map(x => extrasComErro.some(y => y.id === x.id) ? { ...x, resultado: null, calcChave: null } : x))
+    setTentativaExtras(n => n + 1)
+  }
 
   // mexer no carrinho invalida o "salvo" e o valor cobrado — menos ao esvaziar após salvar
   useEffect(() => {
@@ -795,7 +848,7 @@ export default function TabSimulador({ modoVenda, aoSalvar }: {
                   onClick={() => setExtras(p => {
                     // a linha nova herda o produto da de cima (se ela tinha um próprio)
                     const anterior = p[p.length - 1]?.prod ?? null
-                    return [...p, { id: extraIdRef.current++, largura: '', altura: '', qtd: '1', amb: '', resultado: null, prod: anterior && { ...anterior } }]
+                    return [...p, { id: extraIdRef.current++, largura: '', altura: '', qtd: '1', amb: '', resultado: null, calcChave: null, prod: anterior && { ...anterior } }]
                   })}>
                   Adicionar medida
                 </BotaoAdicionar>
@@ -927,10 +980,24 @@ export default function TabSimulador({ modoVenda, aoSalvar }: {
                     Guardar e adicionar outro produto (modelo/tecido)
                   </BotaoAdicionar>
                 )}
-                {extrasPendentes && (
+                {extrasCalculando > 0 && (
                   <p className="mt-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                    Calculando as medidas extras…
+                    Calculando as medidas extras… faltam {extrasCalculando}
                   </p>
+                )}
+                {/* sem isto a medida que falhou ficava em "Calculando…" pra sempre */}
+                {extrasComErro.length > 0 && (
+                  <div className="mt-1.5 space-y-0.5 rounded-lg bg-amber-500/10 px-2.5 py-2">
+                    {extrasComErro.map(x => (
+                      <p key={x.id} className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                        Medida {extras.findIndex(y => y.id === x.id) + 2} ({medidaTxt(x.prod ?? prodTopo, x.largura, x.altura)}): {x.resultado!.erro}
+                      </p>
+                    ))}
+                    <button type="button" onClick={recalcularExtrasComErro}
+                      className="mt-1 rounded-md bg-amber-500/15 px-2.5 py-1 text-[11px] font-bold text-amber-700 transition-colors hover:bg-amber-500/25 dark:text-amber-300">
+                      Tentar de novo
+                    </button>
+                  </div>
                 )}
                 <p className="mt-0.5 text-sm text-foreground/60">
                   em até <strong>4x de {brl(soma!.t4 / 4)}</strong> sem juros
