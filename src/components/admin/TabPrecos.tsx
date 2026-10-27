@@ -581,9 +581,9 @@ function PainelAjustes({ titulo, children }: { titulo: string; children: React.R
  * 14,90; a Flame 3,30 dizia 13,50 e a loja paga 14,50. Quem olhasse a margem
  * por essa coluna veria 50% em tudo, sempre, porque era 50% por construção.
  *
- * Agora ela vem do catálogo, é só leitura e mostra o MENOR custo entre as
- * lojas, que é o que a loja de fato paga. Em branco = tecido ainda não ligado
- * a um material (Estoque → Custos → "Ligar tecidos").
+ * Agora ela vem do catálogo, é só leitura e mostra o custo da loja marcada
+ * com ✓ "comprei aqui" (regra da Stella, 24/10). Em branco = tecido ainda não
+ * ligado a um material, ou sem loja marcada (Orçamentos → Custos → Materiais).
  */
 function SecaoCortinas({ salvar, excluir, adicionar }: SecaoProps) {
   const { data: tecidos, isLoading: l1 } = usePrecosCortinaTecidos()
@@ -640,8 +640,8 @@ function SecaoCortinas({ salvar, excluir, adicionar }: SecaoProps) {
         </p>
         <p className="mb-2 text-xs text-muted-foreground">
           <b>Compra</b> e <b>Margem</b> vêm do catálogo de custos e não se editam aqui — é
-          o menor preço entre as lojas, e a coluna diz de qual. Para corrigir, use{' '}
-          <b>Estoque → Custos</b>.
+          o preço da loja marcada com ✓, e a coluna diz qual. Para corrigir, use{' '}
+          <b>Orçamentos → Custos → Materiais</b>.
           {semLigacao > 0 && (
             <>
               {' '}

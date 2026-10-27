@@ -21,7 +21,6 @@ import LeadTimeView from '@/components/estoque/LeadTimeView'
 import PontoPedidoView from '@/components/estoque/PontoPedidoView'
 import MoverItensView from '@/components/estoque/MoverItensView'
 import ConfiguracaoView from '@/components/estoque/ConfiguracaoView'
-import CatalogoCustosView from '@/components/estoque/CatalogoCustosView'
 import { ChatTrigger } from '@/components/estoque/chat/ChatTrigger'
 import { ChatDrawer } from '@/components/estoque/chat/ChatDrawer'
 import { ConfirmacaoAcao } from '@/components/estoque/chat/ConfirmacaoAcao'
@@ -43,7 +42,7 @@ interface Props {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-const SUBTAB_ORDER = ['visao-geral', 'entradas', 'vendas', 'produtos', 'fornecedores', 'custos', 'localizacoes', 'sobras', 'mercado-livre', 'analises', 'acoes', 'configuracao', 'lead-time', 'mover', 'sugestao', 'ponto-pedido']
+const SUBTAB_ORDER = ['visao-geral', 'entradas', 'vendas', 'produtos', 'fornecedores', 'localizacoes', 'sobras', 'mercado-livre', 'analises', 'acoes', 'configuracao', 'lead-time', 'mover', 'sugestao', 'ponto-pedido']
 
 export default function TabEstoque({ toast, subTab }: Props) {
   const navigate = useNavigate()
@@ -233,7 +232,6 @@ export default function TabEstoque({ toast, subTab }: Props) {
       )}
 
       {/* Drill-downs de Análises */}
-      {subTab === 'custos'       && <CatalogoCustosView toast={toast} />}
       {subTab === 'lead-time'    && <LeadTimeView toast={toast} />}
       {subTab === 'mover'        && <MoverItensView toast={toast} />}
       {subTab === 'sugestao'     && <SugestaoCompraView toast={toast} />}

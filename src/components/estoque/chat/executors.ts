@@ -228,7 +228,7 @@ export async function executarTool(
             sucesso: false,
             mensagem:
               `Gravei, mas ao reler o catálogo o custo vigente de ${atual.descricao} ` +
-              `não ficou ${custoNovo}. NÃO diga que deu certo — peça para conferir na aba Custos.`,
+              `não ficou ${custoNovo}. NÃO diga que deu certo — peça para conferir em Orçamentos → Custos → Materiais.`,
             dados: { custo_relido: confirmado?.custo_unitario ?? null },
           }
         }
@@ -479,7 +479,7 @@ export function gerarPreviewAcao(
         // Não conferiu o material antes: diz isso em vez de fingir que sabe
         // qual é. O usuário pode cancelar e pedir a consulta.
         return (
-          `Alterar custo de material:\n- Material: (não consultado antes — confira na aba Custos)\n` +
+          `Alterar custo de material:\n- Material: (não consultado antes — confira em Orçamentos → Custos → Materiais)\n` +
           `- Novo custo: R$ ${novo.toFixed(4)}` +
           `${args.motivo ? `\n- Motivo: ${args.motivo}` : ""}`
         )
