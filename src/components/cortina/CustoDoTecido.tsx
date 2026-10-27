@@ -122,7 +122,7 @@ export default function CustoDoTecido({
         <p className="mt-1.5 flex items-start gap-1 text-[10px] text-muted-foreground">
           <Link2Off className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />
           <span>
-            {semLigacao.map(p => p.nome).join(' e ')} sem custo — em Estoque → Custos, ligue o
+            {semLigacao.map(p => p.nome).join(' e ')} sem custo — em Orçamentos → Custos → Materiais, ligue o
             {' '}tecido e marque (✓) a loja onde compra.
           </span>
         </p>

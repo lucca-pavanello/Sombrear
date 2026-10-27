@@ -34,7 +34,7 @@ const TabPlanilha     = lazyComRecarga(() => import('@/components/tabs/TabPlanil
 // a aba Agente IA com as suas duas visões (Visão geral e Revisão diária)
 const TabAgenteIA     = lazyComRecarga(() => import('@/components/agente/AbaAgente'))
 const TabCotacao      = lazyComRecarga(() => import('@/components/tabs/TabCotacao'))
-const TabCalculoCusto = lazyComRecarga(() => import('@/components/tabs/TabCalculoCusto'))
+const TabCustos       = lazyComRecarga(() => import('@/components/tabs/TabCustos'))
 
 const TabAnalises     = lazyComRecarga(() => import('@/components/tabs/TabAnalises'))
 const TabSimulador    = lazyComRecarga(() => import('@/components/tabs/TabSimulador'))
@@ -393,10 +393,12 @@ export default function Dashboard() {
     })
   }, [activeTab, isAdmin, canEstoque, canPrecos, canAgenteIA, canOrcamento, profileLoading])
 
-  // URLs antigas continuam funcionando: Agente IA e Tabela de Preços viraram áreas próprias
+  // URLs antigas continuam funcionando: Agente IA e Tabela de Preços viraram áreas próprias,
+  // e o custo dos materiais saiu do Estoque para Orçamentos › Custos (27/10)
   useEffect(() => {
     if (rawPath === 'orcamentos/agente-ia') navigate('/agente-ia', { replace: true })
     if (rawPath === 'admin/precos') navigate('/precos', { replace: true })
+    if (rawPath === 'estoque/custos') navigate('/orcamentos/calculo-custo', { replace: true })
   }, [rawPath, navigate])
 
   useEffect(() => {
@@ -409,7 +411,7 @@ export default function Dashboard() {
         import('@/components/tabs/TabPlanilha')
         import('@/components/tabs/TabCotacao')
         import('@/components/tabs/TabAnalises')
-        import('@/components/tabs/TabCalculoCusto')
+        import('@/components/tabs/TabCustos')
       }
       if (canAgenteIA) import('@/components/agente/AbaAgente')
       if (isAdmin) import('@/components/admin/PainelAdmin')
@@ -539,7 +541,6 @@ export default function Dashboard() {
     { id: 'vendas',       label: 'Vendas',        icon: ShoppingCart    },
     { id: 'produtos',     label: 'Produtos',      icon: Package         },
     { id: 'fornecedores', label: 'Fornecedores',  icon: Truck           },
-    { id: 'custos',       label: 'Custos',        icon: CircleDollarSign },
     { id: 'localizacoes', label: 'Localizações',  icon: MapPin          },
     { id: 'sobras',       label: 'Sobras',        icon: Scissors        },
     { id: 'mercado-livre', label: 'Mercado Livre', icon: Store          },
@@ -1177,7 +1178,7 @@ export default function Dashboard() {
           {mountedTabs.has('calculo-custo') && (
             <Suspense fallback={<SkeletonTable />}>
               <div className={activeTab === 'calculo-custo' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
-                <TabCalculoCusto isLoading={isLoading} error={isError} toast={toast} />
+                <TabCustos podeVerMateriais={isAdmin} isLoading={isLoading} error={isError} toast={toast} />
               </div>
             </Suspense>
           )}
