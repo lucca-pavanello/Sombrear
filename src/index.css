@@ -247,30 +247,32 @@
     animation: tab-reveal 200ms ease-out;
   }
 
+  /* Sem `forwards`: com ele o transform do último quadro (matrix identidade,
+     mesmo pedindo `none`) fica aplicado e vira o bloco de contenção de todo
+     `position: fixed` da aba — os modais (fixed inset-0) abriam no meio da aba
+     inteira, fora da tela. Sem fill, ao terminar a aba volta ao estilo normal,
+     que é igual ao último quadro (opacidade 1, sem deslocamento). */
   .tab-active-right {
-    animation: tab-slide-right 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    animation: tab-slide-right 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
 
   .tab-active-left {
-    animation: tab-slide-left 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    animation: tab-slide-left 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
   }
 
-  /* Termina em `none`, não em translate(0): com `forwards` o transform fica
-     aplicado e vira o bloco de contenção de todo `position: fixed` da aba —
-     os modais (fixed inset-0) abriam no meio da aba inteira, fora da tela. */
   @keyframes tab-reveal {
     from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: none;             }
+    to   { opacity: 1; transform: translateY(0);    }
   }
 
   @keyframes tab-slide-right {
     from { opacity: 0; transform: translateX(18px); }
-    to   { opacity: 1; transform: none;             }
+    to   { opacity: 1; transform: translateX(0);    }
   }
 
   @keyframes tab-slide-left {
     from { opacity: 0; transform: translateX(-18px); }
-    to   { opacity: 1; transform: none;              }
+    to   { opacity: 1; transform: translateX(0);     }
   }
 
   @keyframes tabPulseHalo {
