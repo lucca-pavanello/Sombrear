@@ -169,6 +169,9 @@ export default function TabFechamento() {
   const [agrupando, setAgrupando] = useState(false)
   const [erroAgrupar, setErroAgrupar] = useState<string | null>(null)
   const [numeroNovoPedido, setNumeroNovoPedido] = useState('')
+  // PDF: a loja escolhe o que entra (ex.: o sindicato fica fora do PDF, mas continua no Semanário)
+  const [montandoPdf, setMontandoPdf] = useState(false)
+  const [foraDoPdf, setForaDoPdf] = useState<Set<string>>(new Set())
 
   /**
    * Recalcula a quebra por item de uma venda que entrou sem ela (WhatsApp).
@@ -474,8 +477,20 @@ export default function TabFechamento() {
     }
   }
 
+  // o que vai no PDF: as vendas do período menos as que a loja desmarcou
+  const gruposPdf = useMemo(() => grupos.filter(g => !foraDoPdf.has(g.chave)), [grupos, foraDoPdf])
+  const totaisPdf = useMemo(() => totaisGrupo(gruposPdf.flatMap(g => g.itens)), [gruposPdf])
+
+  function alternarNoPdf(chave: string) {
+    setForaDoPdf(prev => {
+      const novo = new Set(prev)
+      if (novo.has(chave)) novo.delete(chave); else novo.add(chave)
+      return novo
+    })
+  }
+
   async function exportarPdf() {
-    if (baixando || vendas.length === 0) return
+    if (baixando || gruposPdf.length === 0) return
     setBaixando(true)
     try {
       const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
@@ -483,8 +498,9 @@ export default function TabFechamento() {
       ])
       const doc = new jsPDF({ orientation: 'landscape' })
       const rotuloPeriodo = PERIODOS.find(p => p.value === periodo)?.label ?? ''
+      const qtdPdf = gruposPdf.reduce((s, g) => s + g.itens.length, 0)
       const inicioY = faixaMarca(doc, 'Semanário de vendas',
-        `${rotuloPeriodo}${de || ate ? ` (${de} a ${ate})` : ''} · ${vendas.length} venda(s)`)
+        `${rotuloPeriodo}${de || ate ? ` (${de} a ${ate})` : ''} · ${qtdPdf} venda(s)`)
 
       /* A loja pediu (áudio 17/08): só a realidade da venda — quanto o cliente
          pagou, a parcela, a forma, quanto foi pra parceira e quanto sobrou.
@@ -492,7 +508,7 @@ export default function TabFechamento() {
       autoTable(doc, {
         startY: inicioY,
         head: [['Data', 'Pedido', 'Cliente', 'Produto', 'Cliente pagou', 'Parcela', 'Pagamento', 'À parceira', 'Sobra']],
-        body: grupos.flatMap(g => {
+        body: gruposPdf.flatMap(g => {
           const linhas = g.itens.map((o, i) => {
             const pg = pgtoReal(o)
             const parcela = pg.parcelas && pg.parcelas > 1 ? formatCurrency(pago(o) / pg.parcelas) : '—'
@@ -518,7 +534,7 @@ export default function TabFechamento() {
           ]]
         }),
         foot: [['', '', '', 'TOTAIS',
-          formatCurrency(totais.bruto), '', '', formatCurrency(totais.parceira), formatCurrency(totais.sobra)]],
+          formatCurrency(totaisPdf.bruto), '', '', formatCurrency(totaisPdf.parceira), formatCurrency(totaisPdf.sobra)]],
         ...TEMA_TABELA,
         columnStyles: { ...colunasDireita([4, 5, 7, 8]), ...colunasCentro([1, 6]) },
         didParseCell: alinharSecoes({ 1: 'center', 4: 'right', 5: 'right', 6: 'center', 7: 'right', 8: 'right' }),
@@ -770,10 +786,10 @@ export default function TabFechamento() {
             aria-hidden="true" />
           {calculando ? 'Fechar calculadora' : 'Nova venda'}
         </Button>
-        <Button variant="outline" onClick={exportarPdf} loading={baixando}
+        <Button variant={montandoPdf ? 'primary' : 'outline'} onClick={() => setMontandoPdf(v => !v)}
           disabled={vendas.length === 0}>
-          {!baixando && <Download className="h-4 w-4" aria-hidden="true" />}
-          PDF
+          <Download className="h-4 w-4" aria-hidden="true" />
+          {montandoPdf ? 'Fechar PDF' : 'PDF'}
         </Button>
         <Button variant={selecionando ? 'primary' : 'outline'}
           onClick={() => { setSelecionando(v => !v); setSelecionados(new Set()); setErroAgrupar(null) }}>
@@ -805,6 +821,37 @@ export default function TabFechamento() {
             className="rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground">
             <X className="h-3.5 w-3.5" />
           </button>
+        </div>
+      )}
+
+      {/* Monta o PDF: desmarcar uma venda tira ela só do PDF — o Semanário continua igual */}
+      {montandoPdf && (
+        <div className="mb-4 flex flex-col items-center gap-2.5 rounded-xl border border-primary/25 bg-primary/[0.03] px-3 py-3 shadow-sm">
+          <p className="text-xs text-muted-foreground">
+            Desmarque o que <b className="text-foreground/80">não deve ir no PDF</b>. Aqui no Semanário nada muda.
+          </p>
+          <div className="flex flex-wrap justify-center gap-1.5">
+            {grupos.map(g => {
+              const dentro = !foraDoPdf.has(g.chave)
+              return (
+                <label key={g.chave}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
+                    dentro ? 'border-primary/30 bg-background text-foreground' : 'border-border bg-muted/40 text-muted-foreground line-through',
+                  )}>
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-primary"
+                    checked={dentro} onChange={() => alternarNoPdf(g.chave)} />
+                  <span className="font-medium">{g.itens[0].cliente ?? '—'}</span>
+                  <span className="tabular-nums text-muted-foreground">{formatCurrency(totaisGrupo(g.itens).bruto)}</span>
+                </label>
+              )
+            })}
+          </div>
+          <Button variant="brand" size="sm" onClick={exportarPdf} loading={baixando}
+            disabled={gruposPdf.length === 0}>
+            {!baixando && <Download className="h-3.5 w-3.5" aria-hidden="true" />}
+            Baixar PDF · {gruposPdf.length} de {grupos.length} · {formatCurrency(totaisPdf.bruto)}
+          </Button>
         </div>
       )}
 
