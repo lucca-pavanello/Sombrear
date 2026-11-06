@@ -13,7 +13,7 @@ import pytest
 from livekit.agents import AgentSession, llm as lk_llm
 
 from agenda import FUSO
-from equipe import URL_ORCAMENTO, AmandaCliente, abertura
+from equipe import URL_ORCAMENTO, AmandaCliente, abertura, ela_se_despediu, telefone_falado
 from juiz import julgar
 from modelo import criar_llm
 
@@ -102,6 +102,15 @@ async def test_se_perguntarem_se_e_robo_confirma() -> None:
                              "uma pessoa e não nega ser IA.")
 
 
+async def test_duas_perguntas_seguidas_responde_as_duas() -> None:
+    """Simulação de 21/10 com microfone ruim: respondeu o "é robô?" e esqueceu o Mirassol."""
+    modelo, session = await _sessao([("user", "Boa noite. Estou falando com uma pessoa ou com um robô?")])
+    async with modelo, session:
+        result = await session.run(user_input="A loja faz instalação em Mirassol?")
+        await julgar(result, "Responde as duas perguntas: confirma que é a assistente virtual da Sombrear (não diz "
+                             "que é pessoa) e diz que instala em Mirassol.")
+
+
 async def test_outro_assunto_pede_o_nome_e_nao_resolve() -> None:
     modelo, session = await _sessao()
     async with modelo, session:
@@ -130,6 +139,33 @@ async def test_anota_o_contato_e_diz_que_o_time_chama() -> None:
         contato = session.current_agent.ligacao.contato
         assert contato["nome"].startswith("Marcos") and contato["telefone"] == "17991234567"
         await julgar(result, "Diz que o time vai mandar mensagem ou chamar no WhatsApp. Não promete data de instalação.")
+
+
+def test_telefone_falado_pelo_codigo() -> None:
+    assert telefone_falado("17996185177") == "dezessete, nove nove seis um oito, cinco um sete sete"
+    assert telefone_falado("1733041354") == "dezessete, três três zero quatro, um três cinco quatro"
+
+
+async def test_confere_o_telefone_com_a_frase_do_codigo() -> None:
+    """A ligação de 21/10: o cliente ditou certo e ela repetiu "nove nove seis um, oito cinco um, sete
+    sete sete"."""
+    modelo, session = await _sessao([
+        ("user", "Boa noite, tudo certo? Eu estou querendo uma persiana."),
+        ("assistant", "Tudo certo, sim. E é pra qual cômodo?"),
+        ("user", "Para minha sala."),
+        ("assistant", "Consegue me mandar uma foto da janela pelo WhatsApp? Aí a gente te passa tudo certinho."),
+        ("user", "Consigo sim."),
+        ("assistant", "Me diz seu nome e o telefone com DDD, que o time te chama no WhatsApp."),
+    ])
+    async with modelo, session:
+        result = await session.run(user_input="Luca, e o meu telefone é dezessete, nove nove seis um oito, cinco um sete sete.")
+        args = _chamou(result, "conferir_telefone")
+        assert args, "não conferiu pelo código"
+        assert "".join(c for c in args[-1]["telefone"] if c.isdigit()).removeprefix("55") == "17996185177"
+        fala = " ".join(e.item.text_content or "" for e in result.events
+                        if e.type == "message" and e.item.role == "assistant").lower()
+        assert "nove nove seis um oito, cinco um sete sete" in fala, fala
+        assert not _chamou(result, "anotar_contato"), "anotou antes do cliente confirmar"
 
 
 async def test_numero_conhecido_avisa_que_chama_nele_e_pede_so_o_nome() -> None:
@@ -162,6 +198,9 @@ def _historico_com_contato_anotado():
         ("user", "Marcos."),
         ("assistant", "E o seu telefone com DDD?"),
         ("user", "Dezessete, nove nove um dois três, quatro cinco seis sete."),
+        # desde o conferir_telefone (#112) ela repete o número antes de anotar
+        ("assistant", "Dezessete, nove nove um dois três, quatro cinco seis sete, isso?"),
+        ("user", "Isso."),
         ("assistant", "Pronto, Marcos, anotei. O time vai te mandar mensagem no WhatsApp nesse número, tá?"),
     ]
 
@@ -185,7 +224,8 @@ async def test_despedidas_em_loop_ela_desliga() -> None:
     modelo, session = await _sessao(historico)
     async with modelo, session:
         result = await session.run(user_input="Muito obrigado, tchau, até mais!")
-        assert _chamou(result, "encerrar_ligacao"), "ficou no loop de despedida"
+        falas = [e.item.text_content or "" for e in result.events if e.type == "message"]
+        assert _chamou(result, "encerrar_ligacao") or (falas and ela_se_despediu(falas[-1])),             f"ficou no loop de despedida: {falas}"
 
 
 async def test_nao_desliga_no_meio_de_uma_pergunta() -> None:
@@ -218,3 +258,38 @@ async def test_com_o_comodo_pergunta_se_ja_tem_modelo_em_mente() -> None:
         result = await session.run(user_input="Não, não sei qual.")
         await julgar(result, "Pergunta o que mais incomoda na sala (sol, claridade, privacidade) para achar o "
                              "modelo ideal. Uma pergunta só.")
+
+
+async def test_pergunta_e_tchau_na_mesma_fala_responde_e_encerra() -> None:
+    """Simulação de 22/10: respondeu o Mirassol e perguntou "persiana ou cortina?" depois do tchau."""
+    modelo, session = await _sessao()
+    async with modelo, session:
+        result = await session.run(user_input="Oi. Tô falando com uma pessoa ou com um robô? A loja instala "
+                                              "em Mirassol? Obrigada. Tchau.")
+        # desliga pela ferramenta ou pelo tchau no texto (acompanhar_ligacao derruba a linha do mesmo jeito)
+        falas = [e.item.text_content or "" for e in result.events if e.type == "message"]
+        assert _chamou(result, "encerrar_ligacao") or (falas and ela_se_despediu(falas[-1])),             f"não encerrou depois do tchau: {falas}"
+        await julgar(result, "Confirma que é a assistente virtual, responde que instala em Mirassol e se despede, "
+                             "sem fazer pergunta nova ao cliente.")
+
+
+async def test_vou_pensar_depois_do_valor_nao_pede_contato() -> None:
+    """Simulação de 22/10: "vou pensar, obrigado" e ela pediu o nome pra mandar no WhatsApp."""
+    modelo, session = await _sessao([
+        ("user", "Quanto fica uma rolô tela solar três por cento, um e oitenta por um e sessenta, do vão?"),
+        ("assistant", "Fica a partir de quinhentos e sessenta e cinco reais e quarenta centavos em até quatro "
+                      "vezes. Quer que eu te mande esse orçamento no WhatsApp também?"),
+    ])
+    async with modelo, session:
+        result = await session.run(user_input="Vou pensar. Obrigado.")
+        assert not _chamou(result, "anotar_contato")
+        await julgar(result, "Não pede nome nem telefone. Aceita com educação e se despede ou encerra.")
+
+
+async def test_bom_dia_solto_e_depois_o_pedido_vai_direto() -> None:
+    """Simulação de 22/10: o "bom dia" chega num turno e o pedido no outro; ela abria com "Oi, tô aqui"."""
+    modelo, session = await _sessao([("user", "Bom dia.")])
+    async with modelo, session:
+        result = await session.run(user_input="Vocês podem me informar a data da instalação da minha persiana?")
+        falas = " ".join(e.item.text_content or "" for e in result.events if e.type == "message").lower()
+        assert "tô aqui" not in falas and "to aqui" not in falas, falas

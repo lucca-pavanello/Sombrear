@@ -47,6 +47,8 @@ $vozLocal = ($Ouvido -eq "local") -or ($Voz -eq "kokoro")
 if ($SemCanary) { $env:SEM_CANARY = "1" }
 # no console nao ha como desligar: criar este arquivo encerra a ligacao (e manda ao Dash)
 if ($Modo -eq "console") { $env:DESLIGAR_ARQUIVO = "$HOME\.cache\sombrear-voz\desligar" }
+# no console a sala e de mentira: a reducao de ruido do LiveKit Cloud nao roda
+if ($Modo -eq "console") { $env:NC = "0" }
 $env:KOKORO_DIR = "$dados\kokoro"
 $env:PYTHONIOENCODING = "utf-8"
 $pastaVoz = Split-Path $PSScriptRoot -Parent
