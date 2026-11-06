@@ -58,8 +58,9 @@ secrets do agente; nada no repo. Testar: Agent Console do projeto com o agente `
 do agente. Toda ligação, inclusive de teste, vai para o Dash (aba Ligações) e para o CRM.
 
 Cérebro sem passar pela China: `local/medir_cerebro.py` mede cada provedor com o prompt e as
-ferramentas reais (1ª palavra, cache e se veio raciocínio). Linha de base 21/10, DeepSeek oficial:
-0,92 s de mediana, 98% do prompt do cache.
+ferramentas reais (1ª palavra, cache e se veio raciocínio). Em 21/10, mediana até a 1ª palavra:
+DeepSeek oficial 0,92 s, **Baseten 0,34 s** (padrão no código e no ar), os dois com 98% do prompt do
+cache. Baseten cobra US$ 0,30 / 0,007 (cache) / 1,20 por milhão: ~US$ 0,002 por ligação de 3 min.
 
 ## Fase 3: testar pelo celular, de graça
 
@@ -112,7 +113,7 @@ Os outros 10:
 | Peça | Escolha | Custo |
 |---|---|---|
 | Orquestrador | LiveKit Agents, autohospedado | 0 |
-| Entender | DeepSeek V4.1 Flash sem raciocínio (`modelo.py`); no ar, em provedor dos EUA (LGPD) | ~US$ 0,004 por ligação de 3 min |
+| Entender | DeepSeek V4.1 Flash sem raciocínio na Baseten, EUA (`modelo.py`, LGPD) | ~US$ 0,002 por ligação de 3 min |
 | Falar (TTS) | Kokoro, voz "J" (pf_dora 50% + if_sara 25% + pm_alex 25%) | 0 |
 | Falar no teste da fase 3 | ElevenLabs Flash v2.5, voz Jessica (`cgSgspJ2msm6clMCkdW9`), escolhida às cegas pelo Lucca em 17/10/2026; começa a tocar em 0,27 s | grátis até 10 mil créditos |
 | Ouvir (STT) | Deepgram Nova-3 pelo LiveKit Inference (conta LiveKit que já existe; `OUVIDO=local` volta ao Parakeet TDT 0.6b v3 int8 na CPU, fala curta no Canary 1b v2) | US$ 0,0048/min de ligação (Build); local 0 |
