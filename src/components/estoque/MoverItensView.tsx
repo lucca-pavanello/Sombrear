@@ -7,6 +7,7 @@ import {
 } from '@/hooks/useEstoqueSugestoesMover'
 import { useEstoqueLocalizacoes } from '@/hooks/useEstoqueLocalizacoes'
 import { NIVEIS_ACESSO } from '@/lib/constants'
+import { useFecharNoFundo } from '@/hooks/useFecharNoFundo'
 import { ClasseABC } from './shared/ClasseABC'
 import type { EstoqueSugestaoMover } from '@/lib/supabase'
 import type { ToastType } from '@/hooks/useToast'
@@ -28,6 +29,7 @@ export default function MoverItensView({ toast }: Props) {
   const { data: totalAnalisado = 0 } = useTotalProdutosAnalisados()
   const { data: localizacoes = [] } = useEstoqueLocalizacoes()
   const moverMutation = useMoverProduto()
+  const fundoProps = useFecharNoFundo(handleFecharDialog)
 
   const classeACount = sugestoes.filter((s) => s.classe_abc === 'A').length
   const classeCCount = sugestoes.filter((s) => s.classe_abc === 'C').length
@@ -213,7 +215,7 @@ export default function MoverItensView({ toast }: Props) {
           aria-modal="true"
           aria-labelledby="dialog-mover-title"
           className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px] px-4"
-          onClick={e => { if (e.target === e.currentTarget) handleFecharDialog() }}
+          {...fundoProps}
         >
           <div className="w-full max-w-sm bg-card rounded-2xl shadow-elevated">
             {/* Header */}

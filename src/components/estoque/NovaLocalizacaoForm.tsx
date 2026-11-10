@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useFecharNoFundo } from '@/hooks/useFecharNoFundo'
 import { useAddLocalizacao, useUpdateLocalizacao } from '@/hooks/useEstoqueLocalizacoes'
 import { NIVEIS_ACESSO } from '@/lib/constants'
 import type { EstoqueLocalizacao } from '@/lib/supabase'
@@ -28,6 +29,7 @@ const EMPTY_FORM = {
 
 export default function NovaLocalizacaoForm({ open, onClose, toast, editando }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const fundoProps = useFecharNoFundo(onClose)
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [ativo, setAtivo] = useState(true)
@@ -119,7 +121,7 @@ export default function NovaLocalizacaoForm({ open, onClose, toast, editando }: 
       aria-modal="true"
       aria-labelledby="modal-title-localizacao"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px] px-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      {...fundoProps}
     >
       <div
         ref={panelRef}

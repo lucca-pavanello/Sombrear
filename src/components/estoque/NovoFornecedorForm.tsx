@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import * as RadixTabs from '@radix-ui/react-tabs'
 import { X, Plus, Trash2, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useFecharNoFundo } from '@/hooks/useFecharNoFundo'
 import { useAddFornecedor, useUpdateFornecedor } from '@/hooks/useEstoqueFornecedores'
 import { useFornecedorCategorias } from '@/hooks/useFornecedorCategorias'
 import { useFornecedorDescontos } from '@/hooks/useFornecedorDescontos'
@@ -56,6 +57,7 @@ interface Props {
 
 export default function NovoFornecedorForm({ open, onClose, toast, editando }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const fundoProps = useFecharNoFundo(onClose)
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [ativo, setAtivo] = useState(true)
@@ -277,7 +279,7 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
       aria-modal="true"
       aria-labelledby="modal-title-fornecedor"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px] px-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      {...fundoProps}
     >
       <div
         ref={panelRef}

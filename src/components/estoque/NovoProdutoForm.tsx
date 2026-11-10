@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Check, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useFecharNoFundo } from '@/hooks/useFecharNoFundo'
 import { useEstoqueCategorias } from '@/hooks/useEstoqueCategorias'
 import { useEstoqueLocalizacoes } from '@/hooks/useEstoqueLocalizacoes'
 import { useCreateEstoqueProduto, useUpdateEstoqueProduto } from '@/hooks/useEstoqueProdutos'
@@ -42,6 +43,7 @@ const EMPTY_FORM = {
 
 export default function NovoProdutoForm({ open, onClose, toast, editando, responsavel }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const fundoProps = useFecharNoFundo(onClose)
   const [step, setStep] = useState(1)
   const [form, setForm] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -104,7 +106,7 @@ export default function NovoProdutoForm({ open, onClose, toast, editando, respon
   function validate(s: number): boolean {
     const e: Record<string, string> = {}
     if (s === 1) {
-      if (!form.nome.trim()) e.nome = 'Informe o nome do produto'
+      if (!form.nome.trim()) e.nome = 'Informe o nome do material'
       if (!form.categoria_id) e.categoria_id = 'Selecione uma categoria'
       if (!form.unidade) e.unidade = 'Selecione a unidade'
     }
@@ -140,7 +142,7 @@ export default function NovoProdutoForm({ open, onClose, toast, editando, respon
 
       if (isEditing) {
         await updateMutation.mutateAsync({ id: editando!.id, ...payload })
-        toast('success', `Produto "${payload.nome}" atualizado.`)
+        toast('success', `Material "${payload.nome}" atualizado.`)
       } else {
         const criado = await createMutation.mutateAsync(payload)
         const qtdInicial = parseFloat(form.quantidade_inicial)
@@ -154,12 +156,12 @@ export default function NovoProdutoForm({ open, onClose, toast, editando, respon
             responsavel,
           })
         }
-        toast('success', `Produto "${payload.nome}" cadastrado.`)
+        toast('success', `Material "${payload.nome}" cadastrado.`)
       }
       onClose()
     } catch (err) {
       console.error('[NovoProdutoForm]', err)
-      toast('error', 'Erro ao salvar produto.')
+      toast('error', 'Erro ao salvar material.')
     }
   }
 
@@ -171,7 +173,7 @@ export default function NovoProdutoForm({ open, onClose, toast, editando, respon
       aria-modal="true"
       aria-labelledby="modal-title-produto"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px] px-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      {...fundoProps}
     >
       <div
         ref={panelRef}
@@ -181,7 +183,7 @@ export default function NovoProdutoForm({ open, onClose, toast, editando, respon
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-4 shrink-0">
           <h2 id="modal-title-produto" className="font-display text-base font-semibold">
-            {isEditing ? 'Editar Produto' : 'Novo Produto'}
+            {isEditing ? 'Editar material' : 'Novo material'}
           </h2>
           <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-muted transition-colors">
             <X className="h-4 w-4" />
@@ -362,7 +364,7 @@ export default function NovoProdutoForm({ open, onClose, toast, editando, respon
                   value={form.observacoes}
                   onChange={(e) => set('observacoes', e.target.value)}
                   rows={3}
-                  placeholder="Informações adicionais sobre o produto…"
+                  placeholder="Informações adicionais sobre o material…"
                   className={cn(inputClass, 'resize-none')}
                 />
               </div>
@@ -394,7 +396,7 @@ export default function NovoProdutoForm({ open, onClose, toast, editando, respon
               disabled={isPending}
               className="flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-brand hover:opacity-90 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100"
             >
-              {isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Salvando…</> : isEditing ? 'Salvar Alterações' : 'Cadastrar Produto'}
+              {isPending ? <><Loader2 className="h-4 w-4 animate-spin" /> Salvando…</> : isEditing ? 'Salvar Alterações' : 'Cadastrar material'}
             </button>
           )}
         </div>

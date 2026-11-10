@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, Plus, Trash2, Check, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useFecharNoFundo } from '@/hooks/useFecharNoFundo'
 import { useEstoqueFornecedores } from '@/hooks/useEstoqueFornecedores'
 import { useAddLote } from '@/hooks/useEstoqueLotes'
 import { useEstoqueProdutos } from '@/hooks/useEstoqueProdutos'
@@ -37,6 +38,7 @@ const EMPTY_ITEM: LoteItemRascunho = { produto_id: '', quantidade: '', custo_uni
 
 export default function NovoLoteForm({ open, onClose, toast }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const fundoProps = useFecharNoFundo(onClose)
   const [step, setStep] = useState(1)
   const [fornecedor_id, setFornecedorId] = useState('')
   const [nf_numero, setNfNumero] = useState('')
@@ -158,7 +160,7 @@ export default function NovoLoteForm({ open, onClose, toast }: Props) {
       aria-modal="true"
       aria-labelledby="modal-title-lote"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px] px-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      {...fundoProps}
     >
       <div
         ref={panelRef}
@@ -275,7 +277,7 @@ export default function NovoLoteForm({ open, onClose, toast }: Props) {
                   </div>
 
                   <div>
-                    <label className={labelClass}>Produto *</label>
+                    <label className={labelClass}>Material *</label>
                     <CustomSelect
                       value={item.produto_id}
                       onChange={(v) => updateItem(idx, 'produto_id', v)}
