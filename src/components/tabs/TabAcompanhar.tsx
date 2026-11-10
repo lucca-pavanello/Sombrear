@@ -1,409 +1,332 @@
 /**
- * Acompanhar — a fila dos orçamentos que ainda não têm resposta.
+ * Acompanhar — a fila dos orçamentos enviados que ainda não tiveram resposta.
  *
  * Esta é a tela que faltava pro dash contar a verdade. Todo o resto mede
  * orçamento gerado; aqui se registra o que aconteceu depois, em um toque:
  * Fechou, Não fechou ou Sumiu. Só "Fechou" pede mais alguma coisa (canal e
  * pagamento), porque é o único que vira dinheiro no Semanário.
  *
+ * A unidade é o PEDIDO (itens com o mesmo `pedido_id` = um card). Os dados
+ * chegam do Dashboard já filtrados pelo Modo Foco; aqui não há segundo
+ * `useOrcamentos` (cada um abre um canal realtime). Toda ação atualiza o cache
+ * do React Query na hora, grava em segundo plano e oferece "Desfazer"; se a
+ * gravação falha, volta ao que era e o erro aparece dentro do card.
+ *
  * Regra de ouro da tela: marcar tem que ser mais rápido do que ignorar.
  */
-import { useMemo, useState, type ReactNode } from 'react'
-import {
-  CheckCircle2, ChevronRight, Clock, MessageCircle, Search, ThumbsDown, Undo2, UserX, Wallet, X,
-} from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { CheckCircle2, Clock, Search, UserX, Wallet, type LucideIcon } from 'lucide-react'
 
-import { cn, formatCurrency, formatDate } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { supabase, type Orcamento } from '@/lib/supabase'
-import { useOrcamentos } from '@/hooks/useOrcamentos'
-import { Button, EmptyState } from '@/components/ui/primitives'
+import type { ToastType } from '@/hooks/useToast'
+import { Button } from '@/components/ui/primitives'
 import { CustomSelect } from '@/components/ui/CustomSelect'
-import SeloOrigem, { ORIGENS } from '@/components/agente/SeloOrigem'
+import EmptyState from '@/components/shared/EmptyState'
+import AvisoErro from '@/components/shared/AvisoErro'
+import { campoBusca, kpi, segmentado } from '@/components/shared/estilos'
 import JanelaDados from '@/components/orcamentos/JanelaDados'
-import { DESFECHOS, MOTIVOS_PERDA, diasDesde, faixaEspera, type Desfecho } from '@/lib/desfecho'
+import EditOrcamentoForm from '@/components/orcamentos/EditOrcamentoForm'
+import CardPedidoAcompanhar, { type DadosFechou } from '@/components/acompanhar/CardPedido'
+import {
+  agrupar, contarFaixas, escritaVoltar, escritasFechou, escritasNaoFechou, escritasSumiu,
+  filtrar, ordenar, resumir, valoresAnteriores,
+  type CardPedido, type Escrita, type FaixaId, type Ordem, type Vista,
+} from '@/lib/acompanhar'
 
-const receita = (o: Orcamento) => Number(o.valor_venda ?? 0) + Number(o.instalacao ?? 0)
+type ToastFn = (type: ToastType, message: string, opts?: { duration?: number; undoAction?: () => void }) => void
 
-const FAIXAS = [
-  { id: 'todos', rotulo: 'Todos' },
-  { id: 'novo', rotulo: 'Até 7 dias' },
-  { id: 'atencao', rotulo: '8 a 30 dias' },
-  { id: 'frio', rotulo: '+ de 30 dias' },
-] as const
+const POR_PAGINA = 20
 
-const CANAIS = [
-  { value: '', label: 'Não sei de onde veio' },
-  ...ORIGENS.map((o) => ({ value: o.id, label: o.rotulo })),
+const ORDENS: { value: Ordem; label: string }[] = [
+  { value: 'recentes', label: 'Mais recentes' },
+  { value: 'valor', label: 'Maior valor' },
+  { value: 'antigos', label: 'Mais antigos' },
 ]
 
-const soDigitos = (t: string) => t.replace(/\D/g, '')
+export default function TabAcompanhar({ data, loading, error, onRefetch, toast, focoResponsavel }: {
+  /** orçamentos já filtrados pelo Modo Foco */
+  data: Orcamento[]
+  loading: boolean
+  error: boolean
+  onRefetch: () => void
+  toast: ToastFn
+  focoResponsavel: string | null
+}) {
+  const qc = useQueryClient()
 
-export default function TabAcompanhar() {
-  const { data: todos = [], isLoading, refetch } = useOrcamentos()
-
-  const [faixa, setFaixa] = useState<string>('todos')
+  const [faixa, setFaixa] = useState<FaixaId>('novo')
   const [busca, setBusca] = useState('')
-  const [verRespondidos, setVerRespondidos] = useState(false)
-  const [abertoId, setAbertoId] = useState<string | null>(null)
-  const [modo, setModo] = useState<'fechou' | 'perdido' | null>(null)
-  const [salvando, setSalvando] = useState<string | null>(null)
-  const [erro, setErro] = useState<string | null>(null)
+  const [responsavel, setResponsavel] = useState('')
+  const [ordem, setOrdem] = useState<Ordem>('recentes')
+  const [vista, setVista] = useState<Vista>('fila')
+  const [limite, setLimite] = useState(POR_PAGINA)
+  const [salvando, setSalvando] = useState<Set<string>>(new Set())
+  const [erros, setErros] = useState<Record<string, string>>({})
+  const [editando, setEditando] = useState<Orcamento | null>(null)
 
-  // rascunho do painel "Fechou"
-  const [canal, setCanal] = useState('')
-  const [parcelas, setParcelas] = useState('')
-  const [cobrado, setCobrado] = useState('')
+  // linhas atuais por id (o undo e o rollback precisam do valor de ANTES)
+  const porId = useRef(new Map<string, Orcamento>())
+  porId.current = new Map(data.map((o) => [o.id, o]))
+  // o que o "Fechou" desta tela gravou, pra "Voltar pra fila" saber o que pode limpar
+  const gravadoAqui = useRef(new Map<string, { valor_cobrado?: number | null; forma_pagamento_real?: string | null }>())
 
-  const aguardando = useMemo(
-    () => todos
-      .filter((o) => !o.desfecho && !o.fechado)
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
-    [todos])
+  useEffect(() => { setLimite(POR_PAGINA) }, [faixa, busca, responsavel, ordem, vista])
+  // trocar de responsável no Modo Foco não pode deixar um filtro antigo escondido
+  useEffect(() => { if (focoResponsavel) setResponsavel('') }, [focoResponsavel])
 
-  const respondidos = useMemo(
-    () => todos
-      .filter((o) => !!o.desfecho)
-      .sort((a, b) => new Date(b.desfecho_em ?? b.created_at).getTime() - new Date(a.desfecho_em ?? a.created_at).getTime()),
-    [todos])
+  const fila = useMemo(() => agrupar(data, 'fila'), [data])
+  const respondidos = useMemo(() => agrupar(data, 'respondidos'), [data])
+  const resumo = useMemo(() => resumir(fila), [fila])
 
-  const lista = useMemo(() => {
-    const base = verRespondidos ? respondidos : aguardando
-    const termo = busca.trim().toLowerCase()
-    return base.filter((o) => {
-      if (!verRespondidos && faixa !== 'todos' && faixaEspera(diasDesde(o.created_at)).id !== faixa) return false
-      if (termo && !`${o.cliente ?? ''} ${o.modelo ?? ''} ${o.tecido ?? ''}`.toLowerCase().includes(termo)) return false
-      return true
+  const responsaveis = useMemo(
+    () => [...new Set([...fila, ...respondidos].map((c) => c.responsavel))].filter(Boolean).sort(),
+    [fila, respondidos])
+
+  const base = vista === 'fila' ? fila : respondidos
+  const semFaixa = useMemo(
+    () => filtrar(base, { busca, responsavel: focoResponsavel ? '' : responsavel }),
+    [base, busca, responsavel, focoResponsavel])
+  const contagem = useMemo(() => contarFaixas(semFaixa), [semFaixa])
+  const lista = useMemo(
+    () => ordenar(vista === 'fila' ? filtrar(semFaixa, { faixa }) : semFaixa, ordem, vista),
+    [semFaixa, faixa, ordem, vista])
+
+  /* ── cache e gravação ─────────────────────────────────────────────────── */
+
+  function aplicarNoCache(escritas: Escrita[]) {
+    const mapa = new Map(escritas.map((e) => [e.id, e.patch]))
+    qc.setQueriesData<Orcamento[]>({ queryKey: ['orcamentos'] }, (antigo) =>
+      Array.isArray(antigo) ? antigo.map((o) => (mapa.has(o.id) ? { ...o, ...mapa.get(o.id) } : o)) : antigo)
+  }
+
+  async function gravar(e: Escrita) {
+    const { data: linhas, error: erro } = await supabase.from('orcamentos').update(e.patch).eq('id', e.id).select('id')
+    if (erro) throw erro
+    if (!linhas || linhas.length === 0) throw new Error('Sem permissão para alterar este orçamento.')
+  }
+
+  function marcarSalvando(chave: string, ligado: boolean) {
+    setSalvando((s) => { const n = new Set(s); if (ligado) n.add(chave); else n.delete(chave); return n })
+  }
+
+  function limparErro(chave: string) {
+    setErros((e) => { if (!(chave in e)) return e; const { [chave]: _, ...resto } = e; return resto })
+  }
+
+  async function desfazer(anteriores: Escrita[]) {
+    aplicarNoCache(anteriores)
+    const r = await Promise.allSettled(anteriores.map(gravar))
+    if (r.some((x) => x.status === 'rejected')) toast('error', 'Não consegui desfazer tudo. Confira o orçamento.')
+    void qc.invalidateQueries({ queryKey: ['orcamentos'] })
+  }
+
+  /** Aplica as escritas na hora, grava em segundo plano e devolve o Desfazer no toast. */
+  async function executar(card: CardPedido, escritas: Escrita[], mensagem: string) {
+    const anteriores: Escrita[] = escritas.map((e) => {
+      const atual = porId.current.get(e.id)
+      return { id: e.id, patch: atual ? valoresAnteriores(atual, e.patch) : {} }
     })
-  }, [verRespondidos, respondidos, aguardando, faixa, busca])
-
-  const resumo = useMemo(() => ({
-    fila: aguardando.length,
-    parado: aguardando.reduce((s, o) => s + receita(o), 0),
-    frios: aguardando.filter((o) => diasDesde(o.created_at) > 30).length,
-  }), [aguardando])
-
-  function abrir(o: Orcamento, novoModo: 'fechou' | 'perdido') {
-    setErro(null)
-    if (abertoId === o.id && modo === novoModo) { setAbertoId(null); setModo(null); return }
-    setAbertoId(o.id)
-    setModo(novoModo)
-    setCanal(o.origem ?? '')
-    setParcelas('')
-    setCobrado('')
-  }
-
-  async function marcar(o: Orcamento, desfecho: Desfecho, extra: Partial<Orcamento> = {}) {
-    setSalvando(o.id)
-    setErro(null)
+    limparErro(card.chave)
+    marcarSalvando(card.chave, true)
+    aplicarNoCache(escritas)
     try {
-      const { data: sess } = await supabase.auth.getSession()
-      const { error } = await supabase.from('orcamentos').update({
-        desfecho,
-        desfecho_em: new Date().toISOString(),
-        desfecho_por: sess.session?.user?.email ?? null,
-        ...extra,
-      }).eq('id', o.id)
-      if (error) throw error
-      setAbertoId(null)
-      setModo(null)
-      await refetch()
+      const r = await Promise.allSettled(escritas.map(gravar))
+      const falha = r.find((x): x is PromiseRejectedResult => x.status === 'rejected')
+      if (falha) {
+        // desfaz o que chegou a gravar, pra não ficar pedido pela metade
+        await Promise.allSettled(anteriores.map(gravar))
+        throw falha.reason
+      }
+      toast('success', mensagem, { duration: 7000, undoAction: () => { void desfazer(anteriores) } })
     } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Não consegui salvar. Tente de novo.')
+      aplicarNoCache(anteriores)
+      const msg = e instanceof Error && e.message ? e.message : 'Erro desconhecido'
+      setErros((x) => ({ ...x, [card.chave]: `Não consegui salvar (${msg}). Nada foi alterado; tente de novo.` }))
     } finally {
-      setSalvando(null)
+      marcarSalvando(card.chave, false)
+      void qc.invalidateQueries({ queryKey: ['orcamentos'] })
     }
   }
 
-  /** Fechou: vira venda de verdade — liga `fechado`, que é o que o Semanário soma. */
-  async function confirmarFechou(o: Orcamento) {
-    const num = (s: string) => {
-      const v = parseFloat(s.replace(',', '.'))
-      return Number.isFinite(v) && v > 0 ? v : null
-    }
-    const n = Math.round(num(parcelas) ?? 0)
-    const valor = num(cobrado)
-    const efetivo = valor ?? receita(o)
-    let forma: string | null = null
-    if (n >= 2 && efetivo > 0) {
-      const base = receita(o)
-      const juros = base > 0 && efetivo > base + 0.009
-        ? ` · +${(((efetivo - base) / base) * 100).toFixed(1)}% de juros`
-        : ''
-      forma = `${n}x de ${formatCurrency(efetivo / n)}${juros}`
-    } else if (n === 1) {
-      forma = 'à vista'
-    }
-    await marcar(o, 'fechou', {
-      fechado: true,
-      status: 'fechado',
-      origem: canal || o.origem || null,
-      ...(valor != null ? { valor_cobrado: valor } : {}),
-      ...(forma ? { forma_pagamento_real: forma } : {}),
-    })
+  async function email() {
+    const { data: sess } = await supabase.auth.getSession()
+    return sess.session?.user?.email ?? null
   }
 
-  async function devolverPraFila(o: Orcamento) {
-    setSalvando(o.id)
-    setErro(null)
-    try {
-      const { error } = await supabase.from('orcamentos').update({
-        desfecho: null,
-        desfecho_em: null,
-        desfecho_por: null,
-        desfecho_motivo: null,
-        ...(o.desfecho === 'fechou' ? { fechado: false, status: 'em andamento' } : {}),
-      }).eq('id', o.id)
-      if (error) throw error
-      await refetch()
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Não consegui desfazer.')
-    } finally {
-      setSalvando(null)
-    }
+  const nome = (c: CardPedido) => c.cliente || 'Orçamento'
+
+  async function aoFechar(card: CardPedido, dados: DadosFechou) {
+    const escritas = escritasFechou(card.itens, dados, await email())
+    escritas.forEach((e) => gravadoAqui.current.set(e.id, {
+      valor_cobrado: e.patch.valor_cobrado ?? null,
+      forma_pagamento_real: e.patch.forma_pagamento_real ?? null,
+    }))
+    await executar(card, escritas, `${nome(card)} — venda registrada`)
   }
+
+  async function aoNaoFechar(card: CardPedido, motivo: string | null) {
+    await executar(card, escritasNaoFechou(card.itens, motivo, await email()), `${nome(card)} — marcado como não fechou`)
+  }
+
+  async function aoSumir(card: CardPedido) {
+    await executar(card, escritasSumiu(card.itens, await email()), `${nome(card)} — marcado como sumiu`)
+  }
+
+  async function aoVoltar(card: CardPedido) {
+    const escritas = card.itens.map((o) => ({ id: o.id, patch: escritaVoltar(o, gravadoAqui.current.get(o.id)) }))
+    await executar(card, escritas, `${nome(card)} — voltou pra fila`)
+  }
+
+  function irParaFaixa(f: FaixaId) {
+    setVista('fila')
+    setFaixa(f)
+  }
+
+  const faixasUi: { id: FaixaId; rotulo: string }[] = [
+    { id: 'novo', rotulo: 'Novos (até 7 dias)' },
+    { id: 'atencao', rotulo: '8 a 30 dias' },
+    { id: 'frio', rotulo: 'Mais de 30 dias' },
+    { id: 'todos', rotulo: 'Todos' },
+  ]
+
+  const visiveis = lista.slice(0, limite)
+  const restantes = lista.length - visiveis.length
+  const temFiltro = busca.trim() !== '' || (!focoResponsavel && responsavel !== '')
 
   return (
     <>
       {/* Cabeçalho */}
-      <div className="mb-6 flex flex-col items-center gap-2 text-center">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-foreground/40">Dashboard</span>
-          <ChevronRight className="h-3 w-3 text-foreground/30" aria-hidden="true" />
-          <span className="text-xs font-medium text-primary">Acompanhar</span>
-        </div>
-        <div>
-          <h2 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Acompanhar</h2>
-          <p className="mt-0.5 text-sm text-foreground/50">
-            O que aconteceu depois do orçamento. Um toque por cliente: fechou, não fechou ou sumiu.
-          </p>
-        </div>
-      </div>
-
-      {/* Resumo */}
-      <div className="mb-4 grid grid-cols-3 gap-3">
-        <Resumo icone={<Clock className="h-4 w-4" />} rotulo="Esperando resposta" valor={String(resumo.fila)} />
-        <Resumo icone={<Wallet className="h-4 w-4" />} rotulo="Valor parado" valor={formatCurrency(resumo.parado)} />
-        <Resumo icone={<UserX className="h-4 w-4" />} rotulo="Há mais de 30 dias" valor={String(resumo.frios)}
-          alerta={resumo.frios > 0} />
-      </div>
-
-      {/* Filtros */}
-      <div className="mb-4 flex flex-wrap items-center justify-center gap-2 rounded-xl border bg-card px-3 py-2.5 shadow-sm">
-        {!verRespondidos && FAIXAS.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setFaixa(f.id)}
-            className={cn(
-              'rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
-              faixa === f.id
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-border text-muted-foreground hover:border-primary/30 hover:text-primary',
-            )}
-          >
-            {f.rotulo}
-          </button>
-        ))}
-        <div className="relative min-w-[180px] flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" aria-hidden="true" />
-          <input
-            value={busca}
-            onChange={(e) => setBusca(e.target.value)}
-            placeholder="Buscar cliente…"
-            className="w-full rounded-lg border bg-background py-2 pl-8 pr-3 text-sm outline-none focus:border-primary/50"
-          />
-        </div>
-        <Button variant={verRespondidos ? 'primary' : 'outline'} size="sm"
-          onClick={() => { setVerRespondidos((v) => !v); setAbertoId(null) }}>
-          {verRespondidos ? 'Ver a fila' : `Já respondidos (${respondidos.length})`}
-        </Button>
-      </div>
-
-      {erro && (
-        <p className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-center text-sm text-destructive">
-          {erro}
+      <div className="mb-6 text-center">
+        <h2 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Acompanhar</h2>
+        <p className="mt-0.5 text-sm text-foreground/50">
+          Orçamentos enviados que ainda não tiveram resposta. Cobre o cliente e registre o resultado.
         </p>
-      )}
+      </div>
+
+      {/* Resumo — cada cartão também é um filtro */}
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <CartaoResumo icone={Clock} rotulo="Esperando resposta" valor={String(resumo.fila)}
+          ativo={vista === 'fila' && faixa === 'todos'} onClick={() => irParaFaixa('todos')} />
+        <CartaoResumo icone={Wallet} rotulo="Valor parado" valor={formatCurrency(resumo.parado)}
+          ativo={false} onClick={() => irParaFaixa('todos')} />
+        <CartaoResumo icone={UserX} rotulo="Há mais de 30 dias" valor={String(resumo.frios)}
+          alerta={resumo.frios > 0} ativo={vista === 'fila' && faixa === 'frio'} onClick={() => irParaFaixa('frio')} />
+      </div>
+
+      {/* Barra de ferramentas */}
+      <div className="mb-4 space-y-3">
+        {vista === 'fila' && (
+          <div className="overflow-x-auto">
+            <div className={cn(segmentado.trilho, 'w-fit')} role="tablist" aria-label="Tempo de espera">
+              {faixasUi.map((f) => (
+                <button key={f.id} type="button" role="tab" aria-selected={faixa === f.id}
+                  onClick={() => setFaixa(f.id)}
+                  className={cn(segmentado.item, faixa === f.id ? segmentado.ativo : segmentado.inativo)}>
+                  {f.rotulo} <span className="ml-1 tabular-nums opacity-70">{contagem[f.id]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" aria-hidden="true" />
+            <input value={busca} onChange={(e) => setBusca(e.target.value)} className={campoBusca}
+              placeholder="Buscar cliente, telefone, modelo ou tecido…" aria-label="Buscar" />
+          </div>
+          {!focoResponsavel && responsaveis.length > 1 && (
+            <CustomSelect className="w-full sm:w-48" value={responsavel} onChange={setResponsavel}
+              options={[{ value: '', label: 'Todos os responsáveis' }, ...responsaveis.map((r) => ({ value: r, label: r }))]} />
+          )}
+          <CustomSelect className="w-full sm:w-44" value={ordem} onChange={(v) => setOrdem(v as Ordem)} options={ORDENS} />
+          <Button variant={vista === 'respondidos' ? 'primary' : 'outline'} size="md"
+            onClick={() => setVista((v) => (v === 'fila' ? 'respondidos' : 'fila'))}>
+            {vista === 'respondidos' ? 'Ver a fila' : `Já respondidos (${respondidos.length})`}
+          </Button>
+        </div>
+      </div>
 
       {/* Lista */}
-      {isLoading ? (
+      {error ? (
+        <AvisoErro mensagem="Não consegui carregar os orçamentos." aoTentar={onRefetch} />
+      ) : loading ? (
         <p className="py-10 text-center text-sm text-muted-foreground">Carregando…</p>
       ) : lista.length === 0 ? (
-        <EmptyState
-          icon={CheckCircle2}
-          titulo={verRespondidos ? 'Nada respondido ainda' : 'Fila vazia — tudo respondido'}
-          dica={verRespondidos
-            ? 'Marque um orçamento na fila e ele aparece aqui.'
-            : 'Cada orçamento novo entra aqui esperando o desfecho.'}
-        />
+        vista === 'respondidos' ? (
+          <EmptyState icon={CheckCircle2}
+            title={temFiltro ? 'Nenhum resultado' : 'Nada respondido ainda'}
+            description={temFiltro ? 'Nenhum pedido respondido combina com a busca.' : 'Marque um orçamento na fila e ele aparece aqui.'}
+            action={temFiltro ? { label: 'Limpar busca', onClick: () => { setBusca(''); setResponsavel('') } } : undefined} />
+        ) : temFiltro ? (
+          <EmptyState icon={Search} title="Nenhum resultado"
+            description="Nenhum orçamento da fila combina com a busca."
+            action={{ label: 'Limpar busca', onClick: () => { setBusca(''); setResponsavel('') } }} />
+        ) : fila.length === 0 ? (
+          <EmptyState icon={CheckCircle2} title="Fila vazia: tudo respondido"
+            description="Cada orçamento novo entra aqui esperando o resultado." />
+        ) : (
+          <EmptyState icon={CheckCircle2} title="Nenhum orçamento esperando nesta faixa"
+            description={`Ainda há ${fila.length} na fila em outras faixas.`}
+            action={{ label: 'Ver todos', onClick: () => setFaixa('todos') }} />
+        )
       ) : (
-        <div className="space-y-2">
-          {lista.map((o) => {
-            const dias = diasDesde(o.created_at)
-            const f = faixaEspera(dias)
-            const d = o.desfecho ? DESFECHOS[o.desfecho as Desfecho] : null
-            const aberto = abertoId === o.id
-            const ocupado = salvando === o.id
-            const tel = soDigitos(o.telefone ?? '')
-
-            return (
-              <div key={o.id} className="rounded-xl border bg-card p-3 shadow-sm transition-shadow hover:shadow-md sm:p-4">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-semibold text-foreground">{o.cliente || 'Sem nome'}</span>
-                      {o.origem && <SeloOrigem origem={o.origem} compacto />}
-                      {d && (
-                        <span className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold', d.cor)}>
-                          {d.curto}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {o.modelo}{o.tecido ? ` · ${o.tecido}` : ''}
-                      {o.largura && o.altura ? ` · ${o.largura}m × ${o.altura}m` : ''}
-                      {o.quantidade > 1 ? ` · ${o.quantidade} peças` : ''}
-                    </p>
-                  </div>
-
-                  <div className="text-right">
-                    <p className="font-display font-bold tabular-nums text-foreground">{formatCurrency(receita(o))}</p>
-                    <p className={cn('text-[11px] font-medium tabular-nums', verRespondidos ? 'text-muted-foreground' : f.cor)}>
-                      {verRespondidos
-                        ? `respondido em ${formatDate(o.desfecho_em ?? o.created_at)}`
-                        : dias === 0 ? 'hoje' : `há ${dias} dia${dias > 1 ? 's' : ''}`}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Ações */}
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {verRespondidos ? (
-                    <>
-                      {o.desfecho_motivo && (
-                        <span className="text-xs text-muted-foreground">Motivo: {o.desfecho_motivo}</span>
-                      )}
-                      <Button variant="ghost" size="sm" className="ml-auto" loading={ocupado}
-                        onClick={() => devolverPraFila(o)}>
-                        {!ocupado && <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />}
-                        Voltar pra fila
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <Button size="sm" onClick={() => abrir(o, 'fechou')}
-                        className="bg-emerald-600 text-white hover:bg-emerald-600/90"
-                        aria-expanded={aberto && modo === 'fechou'}>
-                        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Fechou
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => abrir(o, 'perdido')}
-                        aria-expanded={aberto && modo === 'perdido'}>
-                        <ThumbsDown className="h-3.5 w-3.5" aria-hidden="true" /> Não fechou
-                      </Button>
-                      <Button variant="ghost" size="sm" loading={ocupado && !aberto}
-                        onClick={() => marcar(o, 'sumiu')}>
-                        {!(ocupado && !aberto) && <UserX className="h-3.5 w-3.5" aria-hidden="true" />} Sumiu
-                      </Button>
-                      {tel && (
-                        <a
-                          href={`https://wa.me/55${tel}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-600 transition-colors hover:bg-emerald-500/10 dark:text-emerald-400"
-                        >
-                          <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" /> Cobrar no WhatsApp
-                        </a>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                {/* Painel do "Fechou" */}
-                {aberto && modo === 'fechou' && (
-                  <div className="mt-3 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.04] p-3">
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        De onde veio o cliente?
-                        <CustomSelect className="mt-1 w-full py-2" value={canal} onChange={setCanal} options={CANAIS} />
-                      </label>
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Em quantas vezes saiu?
-                        <input value={parcelas} onChange={(e) => setParcelas(e.target.value)}
-                          inputMode="numeric" placeholder="ex.: 6"
-                          className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary/50" />
-                      </label>
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Quanto o cliente pagou?
-                        <input value={cobrado} onChange={(e) => setCobrado(e.target.value)}
-                          inputMode="decimal" placeholder={formatCurrency(receita(o))}
-                          className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-primary/50" />
-                      </label>
-                    </div>
-                    <p className="mt-2 text-[11px] text-muted-foreground">
-                      Deixe em branco o que não souber — só o canal já ajuda a saber qual anúncio deu venda.
-                    </p>
-                    <div className="mt-3 flex justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => { setAbertoId(null); setModo(null) }}>
-                        <X className="h-3.5 w-3.5" aria-hidden="true" /> Cancelar
-                      </Button>
-                      <Button size="sm" loading={ocupado}
-                        className="bg-emerald-600 text-white hover:bg-emerald-600/90"
-                        onClick={() => confirmarFechou(o)}>
-                        {!ocupado && <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />} Confirmar venda
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Painel do "Não fechou" */}
-                {aberto && modo === 'perdido' && (
-                  <div className="mt-3 rounded-lg border bg-muted/30 p-3">
-                    <p className="mb-2 text-xs font-medium text-muted-foreground">Por quê? (opcional)</p>
-                    <div className="flex flex-wrap gap-2">
-                      {MOTIVOS_PERDA.map((m) => (
-                        <button
-                          key={m}
-                          disabled={ocupado}
-                          onClick={() => marcar(o, 'perdido', { desfecho_motivo: m })}
-                          className="rounded-full border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 hover:text-primary disabled:opacity-50"
-                        >
-                          {m}
-                        </button>
-                      ))}
-                      <button
-                        disabled={ocupado}
-                        onClick={() => marcar(o, 'perdido')}
-                        className="rounded-full border border-dashed px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-50"
-                      >
-                        Não disse
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+        <div className="space-y-3">
+          {visiveis.map((c) => (
+            <CardPedidoAcompanhar
+              key={c.chave}
+              card={c}
+              vista={vista}
+              ocupado={salvando.has(c.chave)}
+              erro={erros[c.chave]}
+              onFechou={aoFechar}
+              onNaoFechou={aoNaoFechar}
+              onSumiu={aoSumir}
+              onVoltar={aoVoltar}
+              onAbrir={(card) => setEditando(card.itens[0])}
+              onCopiado={(t) => toast('success', `Telefone ${t} copiado`, { duration: 2000 })}
+            />
+          ))}
+          {restantes > 0 && (
+            <div className="flex justify-center pt-1">
+              <Button variant="outline" onClick={() => setLimite((l) => l + POR_PAGINA)}>
+                Mostrar mais ({restantes} restantes)
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
       <JanelaDados className="mt-6" />
+
+      {editando && (
+        <EditOrcamentoForm orcamento={editando} onClose={() => setEditando(null)} toast={toast} />
+      )}
     </>
   )
 }
 
-function Resumo({ icone, rotulo, valor, alerta }: {
-  icone: ReactNode
+function CartaoResumo({ icone: Icone, rotulo, valor, alerta, ativo, onClick }: {
+  icone: LucideIcon
   rotulo: string
   valor: string
   alerta?: boolean
+  ativo: boolean
+  onClick: () => void
 }) {
+  const tom = alerta ? 'amber' : 'neutro'
   return (
-    <div className={cn('rounded-xl border bg-card px-3 py-2.5 text-center shadow-sm',
-      alerta && 'border-amber-500/30 bg-amber-500/[0.04]')}>
-      <div className="flex items-center justify-center gap-1.5 text-muted-foreground">
-        <span className={cn(alerta && 'text-amber-600 dark:text-amber-400')} aria-hidden="true">{icone}</span>
-        <span className="text-[11px] font-medium">{rotulo}</span>
-      </div>
-      <p className="mt-0.5 font-display text-lg font-bold tabular-nums text-foreground">{valor}</p>
-    </div>
+    <button type="button" onClick={onClick} aria-pressed={ativo}
+      className={cn(
+        kpi.cartao, kpi.acento[tom], 'flex w-full flex-col items-center text-center',
+        'hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+        ativo && 'border-primary/50 ring-1 ring-primary/20',
+      )}>
+      <span className={cn(kpi.chip, kpi.chipCor[tom])}><Icone className="h-4 w-4" aria-hidden="true" /></span>
+      <span className={kpi.rotulo}>{rotulo}</span>
+      <span className={cn(kpi.valor, kpi.valorCor[tom])}>{valor}</span>
+    </button>
   )
 }

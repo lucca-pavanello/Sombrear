@@ -418,7 +418,7 @@ export default function HomePage() {
               {recentes.map(g => (
                 <button
                   key={g.id}
-                  onClick={() => ir('/orcamentos/orcamentos')}
+                  onClick={() => ir('/orcamentos/planilha')}
                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60"
                 >
                   <AvatarInitials name={g.responsavel} size="xs" />
