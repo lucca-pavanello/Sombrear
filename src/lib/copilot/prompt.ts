@@ -16,6 +16,10 @@ export function instrucoes(hoje: string, diaDaSemana: string): string {
     'Pergunta sem período: assuma um período razoável (este mês, por padrão) e diga qual usou.',
     'Mês em andamento contra mês fechado: use comparar_periodos, que corta o anterior no mesmo trecho, e diga isso.',
     'Venda é pedido fechado no Semanário; itens do mesmo pedido são uma venda só. Receita é o valor cobrado.',
+    'Orçamento em aberto NÃO é venda: é preço passado que ainda espera resposta (fila do Acompanhar). Nunca some em aberto na receita',
+    'nem chame de venda. Todo orçamento acaba em um desfecho: fechou (virou venda), não fechou (com motivo) ou sumiu (parou de responder).',
+    'Itens do mesmo pedido contam como um orçamento só. Para fila, valor parado e tempo de espera use orcamentos_em_aberto;',
+    'para "por que perdemos" e taxa de fechamento dos orçamentos use desfechos_do_periodo.',
     'Lead é quem conversou com a Stella no WhatsApp. Conversão por canal é lead que comprou dividido por lead do canal.',
     '',
     'Formato: português do Brasil, direto, no máximo 6 linhas ou uma tabela de até 8 linhas.',
@@ -85,6 +89,24 @@ export const FERRAMENTAS = [
     name: 'ver_lead',
     description: 'Ficha de um lead pelo nome (ou parte dele): canal, temperatura, valor cotado, dias sem mensagem, se comprou, resumo e objeções.',
     parameters: { type: 'object', properties: { termo: { type: 'string' } }, required: ['termo'] },
+  },
+  {
+    name: 'orcamentos_em_aberto',
+    description: 'Fila do Acompanhar: orçamentos sem resposta (não são vendas). Devolve quantidade e valor total, divididos por tempo de espera (até 7 dias, 8 a 30, mais de 30), e opcionalmente a lista dos N maiores ou mais antigos com cliente, modelo, valor, dias parado e responsável. Itens do mesmo pedido contam como um.',
+    parameters: {
+      type: 'object',
+      properties: {
+        responsavel: { type: 'string', description: 'filtra pelo responsável (parte do nome)' },
+        modelo: { type: 'string', description: 'filtra pelo modelo (parte do nome)' },
+        limite: { type: 'integer', description: '1 a 20: lista os N primeiros; sem limite devolve só os totais' },
+        ordem: { type: 'string', enum: ['valor', 'antigos'], description: 'valor = maiores primeiro (padrão); antigos = mais tempo parado primeiro' },
+      },
+    },
+  },
+  {
+    name: 'desfechos_do_periodo',
+    description: 'Desfechos de orçamento marcados no período (pelo dia em que foram marcados): quantos fecharam, não fecharam e sumiram, conversão entre quem respondeu, valores e o ranking dos motivos de perda. Responde "por que perdemos orçamentos".',
+    parameters: { type: 'object', properties: { periodo: PERIODO }, required: ['periodo'] },
   },
   {
     name: 'calcular',
