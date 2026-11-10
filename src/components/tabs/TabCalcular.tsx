@@ -24,15 +24,26 @@ const MODOS: { id: Modo; rotulo: string; ajuda: string }[] = [
   { id: 'completo', rotulo: 'Orçamento completo', ajuda: 'Vários ambientes: envia para cálculo e pode mandar o orçamento no WhatsApp.' },
 ]
 
+const MODO_KEY = 'sombrear-calcular-modo'
+
+function modoSalvo(): Modo {
+  try {
+    return localStorage.getItem(MODO_KEY) === 'na-hora' ? 'na-hora' : 'completo'
+  } catch { return 'completo' }
+}
+
 export default function TabCalcular() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const modo: Modo = searchParams.get('modo') === 'na-hora' ? 'na-hora' : 'completo'
+  // ?modo= explícito sempre vence; sem ele, vale o último modo que a pessoa escolheu
+  const daUrl = searchParams.get('modo')
+  const modo: Modo = daUrl === 'na-hora' || daUrl === 'completo' ? daUrl : modoSalvo()
   const [visitados, setVisitados] = useState<Set<Modo>>(() => new Set([modo]))
 
   // visitar um modo (pelo seletor ou direto pela URL) o mantém montado
   if (!visitados.has(modo)) setVisitados(prev => new Set([...prev, modo]))
 
   function trocar(novo: Modo) {
+    try { localStorage.setItem(MODO_KEY, novo) } catch { /* sem armazenamento: só não lembra */ }
     setSearchParams(prev => {
       const p = new URLSearchParams(prev)
       p.set('modo', novo)

@@ -28,10 +28,10 @@ import AvisoErro from '@/components/shared/AvisoErro'
 import { campoBusca, kpi, segmentado } from '@/components/shared/estilos'
 import JanelaDados from '@/components/orcamentos/JanelaDados'
 import EditOrcamentoForm from '@/components/orcamentos/EditOrcamentoForm'
-import CardPedidoAcompanhar, { type DadosFechou } from '@/components/acompanhar/CardPedido'
+import CardPedidoAcompanhar, { type DadosFechou, type RascunhoFechou } from '@/components/acompanhar/CardPedido'
 import {
   agrupar, contarFaixas, escritaVoltar, escritasFechou, escritasNaoFechou, escritasSumiu,
-  filtrar, ordenar, resumir, valoresAnteriores,
+  filtrar, ordenar, resumir, resumoItem, valoresAnteriores,
   type CardPedido, type Escrita, type FaixaId, type Ordem, type Vista,
 } from '@/lib/acompanhar'
 
@@ -70,6 +70,8 @@ export default function TabAcompanhar({ data, loading, error, onRefetch, toast, 
   const porId = useRef(new Map<string, Orcamento>())
   porId.current = new Map(data.map((o) => [o.id, o]))
   // o que o "Fechou" desta tela gravou, pra "Voltar pra fila" saber o que pode limpar
+  // o que foi digitado no painel "Fechou", por card: sobrevive ao card sair da fila durante a gravação
+  const rascunhos = useRef(new Map<string, RascunhoFechou>())
   const gravadoAqui = useRef(new Map<string, { valor_cobrado?: number | null; forma_pagamento_real?: string | null }>())
 
   useEffect(() => { setLimite(POR_PAGINA) }, [faixa, busca, responsavel, ordem, vista])
@@ -96,6 +98,7 @@ export default function TabAcompanhar({ data, loading, error, onRefetch, toast, 
   /* ── cache e gravação ─────────────────────────────────────────────────── */
 
   function aplicarNoCache(escritas: Escrita[]) {
+    // (quem chama já deu cancelQueries; ver executar/desfazer)
     const mapa = new Map(escritas.map((e) => [e.id, e.patch]))
     qc.setQueriesData<Orcamento[]>({ queryKey: ['orcamentos'] }, (antigo) =>
       Array.isArray(antigo) ? antigo.map((o) => (mapa.has(o.id) ? { ...o, ...mapa.get(o.id) } : o)) : antigo)
@@ -116,6 +119,7 @@ export default function TabAcompanhar({ data, loading, error, onRefetch, toast, 
   }
 
   async function desfazer(anteriores: Escrita[]) {
+    await qc.cancelQueries({ queryKey: ['orcamentos'] })
     aplicarNoCache(anteriores)
     const r = await Promise.allSettled(anteriores.map(gravar))
     if (r.some((x) => x.status === 'rejected')) toast('error', 'Não consegui desfazer tudo. Confira o orçamento.')
@@ -130,20 +134,34 @@ export default function TabAcompanhar({ data, loading, error, onRefetch, toast, 
     })
     limparErro(card.chave)
     marcarSalvando(card.chave, true)
+    // uma leitura em andamento não pode sobrescrever a escrita otimista com dado velho
+    await qc.cancelQueries({ queryKey: ['orcamentos'] })
     aplicarNoCache(escritas)
+    let semReverter: string[] = []
     try {
       const r = await Promise.allSettled(escritas.map(gravar))
       const falha = r.find((x): x is PromiseRejectedResult => x.status === 'rejected')
       if (falha) {
         // desfaz o que chegou a gravar, pra não ficar pedido pela metade
-        await Promise.allSettled(anteriores.map(gravar))
+        const volta = await Promise.allSettled(anteriores.map(gravar))
+        // só pode ter ficado alterado o item cuja escrita passou E cuja reversão falhou
+        semReverter = card.itens
+          .filter((o) => {
+            const i = escritas.findIndex((e) => e.id === o.id)
+            return i >= 0 && r[i].status === 'fulfilled' && volta[i].status === 'rejected'
+          })
+          .map(resumoItem)
         throw falha.reason
       }
+      rascunhos.current.delete(card.chave)
       toast('success', mensagem, { duration: 7000, undoAction: () => { void desfazer(anteriores) } })
     } catch (e) {
       aplicarNoCache(anteriores)
       const msg = e instanceof Error && e.message ? e.message : 'Erro desconhecido'
-      setErros((x) => ({ ...x, [card.chave]: `Não consegui salvar (${msg}). Nada foi alterado; tente de novo.` }))
+      const fim = semReverter.length
+        ? ` Estes itens podem ter sido alterados, confira: ${semReverter.join('; ')}.`
+        : ' Nada foi alterado; tente de novo.'
+      setErros((x) => ({ ...x, [card.chave]: `Não consegui salvar (${msg}).${fim}` }))
     } finally {
       marcarSalvando(card.chave, false)
       void qc.invalidateQueries({ queryKey: ['orcamentos'] })
@@ -157,7 +175,9 @@ export default function TabAcompanhar({ data, loading, error, onRefetch, toast, 
 
   const nome = (c: CardPedido) => c.cliente || 'Orçamento'
 
-  async function aoFechar(card: CardPedido, dados: DadosFechou) {
+  async function aoFechar(card: CardPedido, dados: DadosFechou, digitado: RascunhoFechou) {
+    // o card some da fila durante a gravação; se falhar, ele volta com o que foi digitado
+    rascunhos.current.set(card.chave, digitado)
     const escritas = escritasFechou(card.itens, dados, await email())
     escritas.forEach((e) => gravadoAqui.current.set(e.id, {
       valor_cobrado: e.patch.valor_cobrado ?? null,
@@ -239,6 +259,7 @@ export default function TabAcompanhar({ data, loading, error, onRefetch, toast, 
           </div>
           {!focoResponsavel && responsaveis.length > 1 && (
             <CustomSelect className="w-full sm:w-48" value={responsavel} onChange={setResponsavel}
+              placeholder="Todos os responsáveis"
               options={[{ value: '', label: 'Todos os responsáveis' }, ...responsaveis.map((r) => ({ value: r, label: r }))]} />
           )}
           <CustomSelect className="w-full sm:w-44" value={ordem} onChange={(v) => setOrdem(v as Ordem)} options={ORDENS} />
@@ -281,6 +302,7 @@ export default function TabAcompanhar({ data, loading, error, onRefetch, toast, 
               vista={vista}
               ocupado={salvando.has(c.chave)}
               erro={erros[c.chave]}
+              rascunho={rascunhos.current.get(c.chave)}
               onFechou={aoFechar}
               onNaoFechou={aoNaoFechar}
               onSumiu={aoSumir}
@@ -320,7 +342,9 @@ function CartaoResumo({ icone: Icone, rotulo, valor, alerta, ativo, onClick }: {
   return (
     <button type="button" onClick={onClick} aria-pressed={ativo}
       className={cn(
-        kpi.cartao, kpi.acento[tom], 'flex w-full flex-col items-center text-center',
+        // fundo sempre o do card branco; o alerta aparece só na borda, no ícone e no número
+        kpi.cartao, kpi.acento.neutro, 'flex w-full flex-col items-center text-center',
+        alerta && 'border-amber-500/40',
         'hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         ativo && 'border-primary/50 ring-1 ring-primary/20',
       )}>

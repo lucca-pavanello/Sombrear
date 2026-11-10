@@ -294,15 +294,6 @@ export default function TabAnalises({ data, isLoading, error, resetKey, focoResp
         </p>
       )}
 
-      {/* Painel de vendas: o antigo "Lista" de Orçamentos (KPIs, ranking, gráficos e fechados),
-          com os filtros dele. Usa os mesmos orçamentos (já filtrados pelo Modo Foco). */}
-      <section aria-labelledby="painel-vendas" className="space-y-4">
-        <h3 id="painel-vendas" className="text-center font-display text-lg font-semibold tracking-tight">
-          Painel de vendas
-        </h3>
-        <TabOrcamentos data={data} loading={!!isLoading} resetKey={resetKey} />
-      </section>
-
       {carregando ? (
         <EsqueletoAnalises />
       ) : semOrcamentos || semConversas ? (
@@ -315,6 +306,18 @@ export default function TabAnalises({ data, isLoading, error, resetKey, focoResp
             <AvisoErro mensagem="Não consegui atualizar agora. Mostrando o que foi lido por último."
               aoTentar={tentarDeNovo} />
           )}
+
+          {/* Painel de vendas: o antigo "Lista" de Orçamentos (KPIs, ranking, gráficos e fechados),
+              com os filtros dele. Usa os mesmos orçamentos (já filtrados pelo Modo Foco). Fica no
+              mesmo ramo protegido do resto: nunca mostra zeros quando carregando ou com erro.
+              Não sincroniza a URL: a tela fica montada e apagaria a query das outras abas. */}
+          <section aria-labelledby="painel-vendas" className="space-y-4">
+            <h3 id="painel-vendas" className="text-center font-display text-lg font-semibold tracking-tight">
+              Painel de vendas
+            </h3>
+            <TabOrcamentos data={data} loading={false} resetKey={resetKey} sincronizarUrl={false} />
+          </section>
+
           <Abertura
             manchete={manchete}
             observacoes={calc.observacoes}

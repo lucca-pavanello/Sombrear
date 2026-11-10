@@ -45,7 +45,7 @@ const AREAS: Record<Area, { sugestoes: string[]; dica: string }> = {
 /** Rota -> área. As abas de orçamento moram em /orcamentos/* e também em rotas soltas legadas. */
 function areaDaRota(pathname: string): Area {
   const raiz = pathname.replace(/^\/+/, '').split('/')[0]
-  if (['orcamentos', 'acompanhar', 'planilha', 'calcular-orcamento', 'calculo-custo', 'simulador'].includes(raiz)) return 'orcamentos'
+  if (['orcamentos', 'acompanhar', 'planilha', 'calcular-orcamento'].includes(raiz)) return 'orcamentos'
   if (['fechamento', 'relatorios', 'analises'].includes(raiz)) return 'vendas'
   if (raiz === 'agente-ia') return 'agente-ia'
   return 'geral'

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, useId } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Search, Check, PackageSearch } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -46,6 +46,7 @@ export default function SeletorMaterial({
   const [focado, setFocado] = useState(0)
   const [style, setStyle] = useState<React.CSSProperties>({})
 
+  const idBase = useId()
   const botaoRef = useRef<HTMLButtonElement>(null)
   const painelRef = useRef<HTMLDivElement>(null)
   const buscaRef = useRef<HTMLInputElement>(null)
@@ -124,6 +125,11 @@ export default function SeletorMaterial({
     }
     function tecla(e: KeyboardEvent) {
       if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); botaoRef.current?.focus(); return }
+      // setas/Enter só valem na busca ou na lista; num chip de categoria o Enter é do chip
+      const alvo = e.target as Node | null
+      const naBusca = alvo === buscaRef.current
+      const naLista = alvo instanceof Element && !!alvo.closest('[role="listbox"]')
+      if (!naBusca && !naLista) return
       if (e.key === 'ArrowDown') { e.preventDefault(); setFocado((i) => Math.min(i + 1, filtrados.length - 1)) }
       if (e.key === 'ArrowUp') { e.preventDefault(); setFocado((i) => Math.max(i - 1, 0)) }
       if (e.key === 'Enter' && filtrados[focado]) { e.preventDefault(); escolher(filtrados[focado]) }
@@ -205,21 +211,24 @@ export default function SeletorMaterial({
                 onChange={(e) => setBusca(e.target.value)}
                 placeholder="Buscar por nome ou código…"
                 aria-label="Buscar material"
+                role="combobox"
+                aria-expanded="true"
+                aria-controls={`${idBase}-lista`}
+                aria-activedescendant={filtrados[focado] ? `${idBase}-op-${filtrados[focado].id}` : undefined}
                 className="w-full rounded-md border border-border bg-background pl-8 pr-3 py-2 text-base sm:text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
               />
             </div>
           </div>
 
           {/* Chips de categoria */}
-          <div className="shrink-0 flex gap-1.5 overflow-x-auto px-3 pb-2" role="tablist" aria-label="Categoria">
+          <div className="shrink-0 flex gap-1.5 overflow-x-auto px-3 pb-2" role="group" aria-label="Categoria">
             {[['', produtos.length] as [string, number], ...categorias].map(([nome, n]) => {
               const ativo = categoria === nome
               return (
                 <button
                   key={nome || 'todas'}
                   type="button"
-                  role="tab"
-                  aria-selected={ativo}
+                  aria-pressed={ativo}
                   onClick={() => setCategoria(nome)}
                   className={cn(
                     'shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors',
@@ -235,7 +244,7 @@ export default function SeletorMaterial({
           </div>
 
           {/* Lista */}
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain border-t border-border/40 py-1" role="listbox">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain border-t border-border/40 py-1" role="listbox" id={`${idBase}-lista`}>
             {filtrados.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-muted-foreground">
                 <PackageSearch className="mx-auto mb-2 h-5 w-5 opacity-50" />
@@ -257,6 +266,7 @@ export default function SeletorMaterial({
                 return (
                   <button
                     key={p.id}
+                    id={`${idBase}-op-${p.id}`}
                     ref={(el) => { itemRefs.current[idx] = el }}
                     type="button"
                     role="option"
@@ -264,8 +274,8 @@ export default function SeletorMaterial({
                     onClick={() => escolher(p)}
                     onMouseEnter={() => setFocado(idx)}
                     className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2 text-left transition-colors',
-                      sel ? 'bg-primary/[0.08]' : idx === focado ? 'bg-muted/60' : 'hover:bg-muted/40',
+                      'w-full flex items-center gap-3 border-l-2 border-transparent px-3 py-2 text-left transition-colors',
+                      sel ? 'bg-muted !border-primary' : idx === focado ? 'bg-muted/60' : 'hover:bg-muted/40',
                     )}
                   >
                     <span className="flex-1 min-w-0">

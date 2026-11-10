@@ -26,7 +26,9 @@ interface Opcoes {
   aoFinalizar: (audio: AudioGravado) => void
 }
 
-const TIPOS_PREFERIDOS = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg']
+// Ordem de preferência: ogg/opus é o que o Gemini documenta (ogg); depois webm e mp4.
+// O servidor aceita webm, ogg, mp4, mpeg, wav, aac e flac (sem parâmetros de codec).
+const TIPOS_PREFERIDOS = ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
 
 export function escolherMimeType(): string | undefined {
   if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') return undefined
@@ -82,6 +84,11 @@ export function useGravadorAudio({ maxSegundos = 90, aoFinalizar }: Opcoes) {
   const inicioRef = useRef(0)
   const timerRef = useRef<number | null>(null)
   const descartarRef = useRef(false)
+  // Cada iniciar() ganha um número; cancelar()/desmontar invalidam as tentativas em andamento.
+  // Sem isso, a permissão do microfone aprovada DEPOIS de cancelar/desmontar abria a gravação sozinha.
+  const tentativaRef = useRef(0)
+  const montadoRef = useRef(true)
+  const pedindoRef = useRef(false)
   const callbackRef = useRef(aoFinalizar)
   callbackRef.current = aoFinalizar
 
@@ -101,6 +108,8 @@ export function useGravadorAudio({ maxSegundos = 90, aoFinalizar }: Opcoes) {
   }, [])
 
   const cancelar = useCallback(() => {
+    tentativaRef.current++ // invalida um getUserMedia ainda pendente
+    pedindoRef.current = false
     descartarRef.current = true
     const g = gravadorRef.current
     if (g && g.state !== 'inactive') g.stop()
@@ -113,10 +122,20 @@ export function useGravadorAudio({ maxSegundos = 90, aoFinalizar }: Opcoes) {
     setErro(null)
     const motivo = motivoIndisponivel()
     if (motivo) { setErro(motivo); return }
-    if (gravadorRef.current) return
+    if (gravadorRef.current || pedindoRef.current) return
+    const tentativa = ++tentativaRef.current
+    const caducou = () => !montadoRef.current || tentativa !== tentativaRef.current
+    pedindoRef.current = true
     setEstado('pedindo-permissao')
+    let stream: MediaStream | null = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (tentativa === tentativaRef.current) pedindoRef.current = false
+      if (caducou()) {
+        // desmontou ou cancelou com o pedido de permissão aberto: solta o microfone e some
+        stream.getTracks().forEach(t => t.stop())
+        return
+      }
       streamRef.current = stream
       const mimeType = escolherMimeType()
       const gravador = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
@@ -163,18 +182,30 @@ export function useGravadorAudio({ maxSegundos = 90, aoFinalizar }: Opcoes) {
         if (s >= maxSegundos && gravador.state !== 'inactive') { setEstado('finalizando'); gravador.stop() }
       }, 250)
     } catch (err) {
+      if (tentativa === tentativaRef.current) pedindoRef.current = false
+      if (caducou()) {
+        // tentativa antiga: só solta o que ELA abriu, sem mexer na gravação nova nem na tela
+        stream?.getTracks().forEach(t => t.stop())
+        return
+      }
       limpar()
+      stream?.getTracks().forEach(t => t.stop())
       setErro(mensagemDeErroMicrofone(err))
       setEstado('ocioso')
     }
   }, [limpar, maxSegundos])
 
   // desmontou no meio da gravação: solta o microfone e não entrega nada
-  useEffect(() => () => {
-    descartarRef.current = true
-    const g = gravadorRef.current
-    if (g && g.state !== 'inactive') { try { g.stop() } catch { /* já parado */ } }
-    limpar()
+  useEffect(() => {
+    montadoRef.current = true
+    return () => {
+      montadoRef.current = false
+      tentativaRef.current++
+      descartarRef.current = true
+      const g = gravadorRef.current
+      if (g && g.state !== 'inactive') { try { g.stop() } catch { /* já parado */ } }
+      limpar()
+    }
   }, [limpar])
 
   return {

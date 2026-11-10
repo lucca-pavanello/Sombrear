@@ -75,7 +75,7 @@ export default function AnalisesView({ toast }: Props) {
       </GrupoPainel>
 
       <GrupoPainel step="3" titulo="Fornecedores e espaço" dica="quem entrega e onde fica cada material">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4">
           <SecaoPerformanceFornecedor ir={ir} />
           <SecaoPerformanceLocalizacao ir={ir} />
         </div>
@@ -272,6 +272,18 @@ function SecaoPerformanceFornecedor({ ir }: { ir: Ir }) {
       header: 'Comprado 90d',
       align: 'right',
       cell: (r) => <span className="tabular-nums">{fmtBRL(r.valor_total_comprado)}</span>,
+    },
+    {
+      key: 'custo_medio',
+      header: 'Custo unit. médio',
+      align: 'right',
+      cell: (r) => <span className="tabular-nums text-muted-foreground">{r.custo_unitario_medio > 0 ? fmtBRL(r.custo_unitario_medio) : '—'}</span>,
+    },
+    {
+      key: 'materiais',
+      header: 'Materiais',
+      align: 'right',
+      cell: (r) => <span className="tabular-nums text-muted-foreground">{r.produtos_fornecidos}</span>,
     },
   ]
 
@@ -551,6 +563,12 @@ function SecaoPerformanceLocalizacao({ ir }: { ir: Ir }) {
           {NIVEIS_ACESSO[r.nivel_acesso ?? ''] ?? r.nivel_acesso ?? '—'}
         </span>
       ),
+    },
+    {
+      key: 'materiais',
+      header: 'Materiais',
+      align: 'right',
+      cell: (r) => <span className="tabular-nums text-muted-foreground">{r.total_produtos}</span>,
     },
     {
       key: 'estoque',
