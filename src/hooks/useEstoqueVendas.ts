@@ -34,6 +34,24 @@ export type NovaVendaPayload = {
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
+/**
+ * Nome de quem registrou a venda. `vendedor_id` aponta para auth.users, não para
+ * `profiles`, então o PostgREST não consegue embutir `profiles(...)` na consulta
+ * (erro PGRST200, que derrubava o histórico inteiro). Busca à parte e, se falhar,
+ * a tela segue com o texto livre de `vendedor`.
+ */
+async function nomesPorVendedorId(ids: (string | null)[]): Promise<Map<string, string>> {
+  const unicos = [...new Set(ids.filter((id): id is string => !!id))]
+  const nomes = new Map<string, string>()
+  if (unicos.length === 0) return nomes
+  const { data } = await supabase.from('profiles').select('id, full_name, email').in('id', unicos)
+  for (const p of data ?? []) {
+    const nome = p.full_name ?? p.email
+    if (nome) nomes.set(p.id, nome)
+  }
+  return nomes
+}
+
 export function useVendas() {
   return useQuery({
     queryKey: ['estoque-vendas'],
@@ -42,7 +60,6 @@ export function useVendas() {
         .from('estoque_vendas')
         .select(`
           id, data, cliente, total, vendedor_id, vendedor, created_at, observacao,
-          profiles!vendedor_id(full_name, email),
           estoque_venda_itens(count)
         `)
         .order('data', { ascending: false })
@@ -50,6 +67,8 @@ export function useVendas() {
         .limit(50)
 
       if (error) throw error
+
+      const nomes = await nomesPorVendedorId((data ?? []).map((row: any) => row.vendedor_id))
 
       return (data ?? []).map((row: any) => ({
         id: row.id,
@@ -61,7 +80,7 @@ export function useVendas() {
         vendedor: row.vendedor ?? null,
         observacao: row.observacao,
         num_itens: row.estoque_venda_itens?.[0]?.count ?? 0,
-        vendedor_nome: row.profiles?.full_name ?? row.profiles?.email ?? null,
+        vendedor_nome: nomes.get(row.vendedor_id) ?? null,
       }))
     },
     staleTime: 30_000,
@@ -81,7 +100,6 @@ export function useVendaDetalhe(id: string | null) {
         .from('estoque_vendas')
         .select(`
           id, data, cliente, total, vendedor_id, vendedor, created_at, observacao,
-          profiles!vendedor_id(full_name, email),
           estoque_venda_itens(
             id, venda_id, produto_id, quantidade, preco_unitario, desconto, subtotal,
             estoque_produtos(nome, unidade, codigo)
@@ -94,6 +112,7 @@ export function useVendaDetalhe(id: string | null) {
       if (!data) return null
 
       const row = data as any
+      const nomes = await nomesPorVendedorId([row.vendedor_id])
       return {
         id: row.id,
         created_at: row.created_at,
@@ -103,7 +122,7 @@ export function useVendaDetalhe(id: string | null) {
         vendedor_id: row.vendedor_id,
         vendedor: row.vendedor ?? null,
         observacao: row.observacao,
-        vendedor_nome: row.profiles?.full_name ?? row.profiles?.email ?? null,
+        vendedor_nome: nomes.get(row.vendedor_id) ?? null,
         estoque_venda_itens: row.estoque_venda_itens ?? [],
       }
     },

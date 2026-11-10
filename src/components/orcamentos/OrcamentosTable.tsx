@@ -139,8 +139,9 @@ function Highlight({ text, query }: { text: string | null | undefined; query: st
   )
 }
 
-function exportCSV(data: Orcamento[]) {
-  const headers = ['#', 'Data', 'Cliente', 'Telefone', 'Responsável', 'Ambiente', 'Modelo', 'Tecido', 'Qtd', 'Valor', 'Instalação', 'Custo (R$)', 'Margem (%)', 'Fechado']
+// Custo de compra só sai no arquivo para admin — a mesma regra das colunas da tela (`somenteAdmin`).
+function exportCSV(data: Orcamento[], comCusto: boolean) {
+  const headers = ['#', 'Data', 'Cliente', 'Telefone', 'Responsável', 'Ambiente', 'Modelo', 'Tecido', 'Qtd', 'Valor', 'Instalação', ...(comCusto ? ['Custo (R$)'] : []), 'Margem (%)', 'Fechado']
   const rows = data.map((o, i) => {
     const m = calcMargem(o)
     return [
@@ -155,7 +156,7 @@ function exportCSV(data: Orcamento[]) {
       o.quantidade,
       o.valor_venda ?? '',
       o.instalacao ?? '',
-      o.custo_tecido ?? '',
+      ...(comCusto ? [o.custo_tecido ?? ''] : []),
       m != null ? m.toFixed(1) : '',
       o.fechado ? 'Sim' : 'Não',
     ]
@@ -172,7 +173,7 @@ function exportCSV(data: Orcamento[]) {
   URL.revokeObjectURL(url)
 }
 
-async function exportXLSX(data: Orcamento[]) {
+async function exportXLSX(data: Orcamento[], comCusto: boolean) {
   // Import dinâmico: vendor-xlsx só baixa quando o usuário exporta
   const XLSX = await import('xlsx')
   const rows = data.map((o, i) => ({
@@ -187,7 +188,7 @@ async function exportXLSX(data: Orcamento[]) {
     Quantidade: o.quantidade,
     'Valor Venda': o.valor_venda ?? '',
     'Valor Instalação': o.instalacao ?? '',
-    'Custo (R$)': o.custo_tecido ?? '',
+    ...(comCusto ? { 'Custo (R$)': o.custo_tecido ?? '' } : {}),
     'Margem (%)': calcMargem(o) != null ? (calcMargem(o) as number).toFixed(1) : '',
     Fechado: o.fechado ? 'Sim' : 'Não',
     Observações: o.observacoes ?? '',
@@ -198,7 +199,7 @@ async function exportXLSX(data: Orcamento[]) {
   XLSX.writeFile(wb, `orcamentos-${new Date().toISOString().slice(0, 10)}.xlsx`)
 }
 
-async function exportPDF(data: Orcamento[], isFiltered: boolean) {
+async function exportPDF(data: Orcamento[], isFiltered: boolean, comCusto: boolean) {
   // Import dinâmico: vendor-pdf só baixa quando o usuário exporta
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'),
@@ -215,7 +216,7 @@ async function exportPDF(data: Orcamento[], isFiltered: boolean) {
 
   autoTable(doc, {
     startY: inicioY,
-    head: [['#', 'Data', 'Cliente', 'Responsável', 'Ambiente', 'Modelo', 'Tecido', 'Qtd', 'Valor Venda', 'Instalação', 'Total', 'Custo', 'Margem', 'Fechado']],
+    head: [['#', 'Data', 'Cliente', 'Responsável', 'Ambiente', 'Modelo', 'Tecido', 'Qtd', 'Valor Venda', 'Instalação', 'Total', ...(comCusto ? ['Custo'] : []), 'Margem', 'Fechado']],
     body: data.map((o, i) => {
       const m = calcMargem(o)
       return [
@@ -230,12 +231,12 @@ async function exportPDF(data: Orcamento[], isFiltered: boolean) {
         o.valor_venda ? formatCurrency(o.valor_venda) : '—',
         o.instalacao ? formatCurrency(o.instalacao) : '—',
         formatCurrency((o.valor_venda ?? 0) + (o.instalacao ?? 0)),
-        o.custo_tecido ? formatCurrency(o.custo_tecido) : '—',
+        ...(comCusto ? [o.custo_tecido ? formatCurrency(o.custo_tecido) : '—'] : []),
         m != null ? m.toFixed(1) + '%' : '—',
         o.fechado ? 'Sim' : 'Não',
       ]
     }),
-    foot: [['', '', '', '', '', '', `${fechados} fechados`, '', formatCurrency(totalVenda), formatCurrency(totalInst), formatCurrency(totalGeral), '', '', '']],
+    foot: [['', '', '', '', '', '', `${fechados} fechados`, '', formatCurrency(totalVenda), formatCurrency(totalInst), formatCurrency(totalGeral), ...(comCusto ? [''] : []), '', '']],
     ...TEMA_TABELA,
     headStyles: { ...TEMA_TABELA.headStyles, fontSize: 8 },
     bodyStyles: { fontSize: 7.5 },
@@ -515,13 +516,13 @@ export default function OrcamentosTable({ data, toast, isFiltered, search = '', 
             </button>
             {/* Exports */}
             <div className="flex items-center gap-1 rounded-lg bg-muted p-1">
-              <button onClick={() => exportCSV(sorted)} disabled={data.length === 0} title={`Exportar ${sorted.length} registros como CSV`} className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground hover:scale-105 active:scale-95 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100">
+              <button onClick={() => exportCSV(sorted, isAdmin)} disabled={data.length === 0} title={`Exportar ${sorted.length} registros como CSV`} className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground hover:scale-105 active:scale-95 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100">
                 <Download className="h-3.5 w-3.5" />CSV
               </button>
-              <button onClick={() => exportXLSX(sorted)} disabled={data.length === 0} title={`Exportar ${sorted.length} registros como XLSX`} className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground hover:scale-105 active:scale-95 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100">
+              <button onClick={() => exportXLSX(sorted, isAdmin)} disabled={data.length === 0} title={`Exportar ${sorted.length} registros como XLSX`} className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground hover:scale-105 active:scale-95 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100">
                 <Download className="h-3.5 w-3.5" />XLSX
               </button>
-              <button onClick={() => exportPDF(sorted, !!isFiltered)} disabled={data.length === 0} title={`Exportar ${sorted.length} registros como PDF`} className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground hover:scale-105 active:scale-95 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100">
+              <button onClick={() => exportPDF(sorted, !!isFiltered, isAdmin)} disabled={data.length === 0} title={`Exportar ${sorted.length} registros como PDF`} className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground hover:scale-105 active:scale-95 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100">
                 <FileDown className="h-3.5 w-3.5" />PDF
               </button>
             </div>
