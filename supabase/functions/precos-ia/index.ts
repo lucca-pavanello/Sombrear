@@ -3,10 +3,19 @@
  * IA de gestão de preços (Precificação 2.0 — Fase 4).
  * Princípio: a IA PROPÕE, o admin CONFIRMA, o sistema APLICA (com auditoria).
  *
- * modo 'propor'  → interpreta o pedido em linguagem natural e devolve { resposta, acoes[] }
- * modo 'aplicar' → valida e aplica as ações confirmadas, grava auditoria e dispara o sync
+ * modo 'propor'  → interpreta o pedido (texto e/ou áudio) e devolve { resposta, acoes[], transcricao }
+ *                   Ações de parâmetro fora do normal voltam com `suspeita: true` + `motivo`.
+ * modo 'aplicar' → valida e aplica as ações confirmadas, grava auditoria (com `lote_id` no
+ *                   detalhe) e devolve { ok, aplicadas, lote_id }. Ação suspeita só entra com
+ *                   `confirmada_suspeita: true` (o admin marcou a caixa extra na tela).
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Funções puras compartilhadas com o front/testes (sem import de navegador)
+import { avaliarParametro } from '../../../src/lib/precos-ia/sanidade.ts'
+import { validarAudio } from '../../../src/lib/precos-ia/audio.ts'
+import { extrairJson } from '../../../src/lib/precos-ia/json.ts'
+
+const MAX_ACOES = 60
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -94,7 +103,9 @@ Deno.serve(async (req) => {
     // ══════════════ MODO PROPOR ══════════════
     if (body.modo === 'propor') {
       const mensagem = String(body.mensagem ?? '').slice(0, 2000)
-      if (!mensagem.trim()) return resposta(400, { error: 'Mensagem vazia' })
+      const audio = body.audio != null ? validarAudio(body.audio) : null
+      if (audio && !audio.ok) return resposta(audio.status, { error: audio.erro })
+      if (!mensagem.trim() && !audio) return resposta(400, { error: 'Mensagem vazia' })
 
       // contexto compacto do banco — TODAS as tabelas de preço (menos a matriz Romana, grande demais)
       const [
@@ -162,9 +173,16 @@ Deno.serve(async (req) => {
 
       const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })
       const sistema = `Você é a assistente de gestão de preços da Sombrear (persianas). Hoje é ${hoje}.
-O admin descreve mudanças em linguagem natural; você devolve APENAS um JSON válido:
-{"resposta": "texto curto e simpático confirmando o que entendeu (ou perguntando o que faltou)",
+O admin descreve mudanças em linguagem natural (digitada ou FALADA); você devolve APENAS um JSON válido:
+{"transcricao": "se veio áudio: o que o admin disse, palavra por palavra; sem áudio: string vazia",
+ "resposta": "texto curto e simpático confirmando o que entendeu (ou perguntando o que faltou)",
  "acoes": [lista de ações — VAZIA se faltar informação ou o pedido não for sobre preços]}
+
+ÁUDIO: quando a mensagem do admin vier como áudio, (a) transcreva fielmente em português do Brasil no campo
+"transcricao", sem corrigir nem resumir; (b) trate essa transcrição EXATAMENTE como um pedido digitado
+(mesmas regras, mesma confirmação). Números falados viram números: "dois vírgula nove" = 2.9,
+"um oitenta e cinco" falando de markup = 1.85, "dez por cento" = 10. Se o áudio estiver mudo ou
+ininteligível: transcricao vazia, acoes vazia e peça pra repetir. Nunca invente o que não foi dito.
 
 Tipos de ação permitidos (use EXATAMENTE estes campos):
 - {"tipo":"criar_promocao","tecido":"NOME EXATO","desconto_pct":10,"inicio":"YYYY-MM-DD","fim":"YYYY-MM-DD"}
@@ -183,10 +201,30 @@ Tipos de ação permitidos (use EXATAMENTE estes campos):
 
 Regras:
 - Use APENAS nomes que existem nos dados abaixo (case exato). Se o admin falar "screen 3 bege", encontre "SCREEN 3% BEGE".
-- Um pedido pode gerar várias ações (ex.: "screen 1% em promoção" = 1 ação por... NÃO: promoção é por NOME de tecido, uma ação por nome distinto que casar).
+- Um pedido pode gerar várias ações (até ${MAX_ACOES}). Promoção é por NOME de tecido: "screen 1% em promoção" gera
+  uma ação criar_promocao para cada nome distinto de tecido que casar com "screen 1%" (não uma por largura).
+- Mudar vários parâmetros num só pedido é normal ("sobe o markup de venda pra 2,9 e o de PV pra 1,85"): uma
+  atualizar_parametro por chave. Valor que pareça erro (28 em vez de 2,8): proponha o que ouviu — o sistema
+  marca o suspeito pro admin conferir — e comente isso na resposta.
 - Datas relativas: resolva com base em hoje ("a partir de segunda", "até o fim do mês").
 - NUNCA invente valores. Dúvida ou ambiguidade → acoes vazia + pergunta na resposta.
 - Pedidos fora de preços/promoções/parâmetros → acoes vazia + explique educadamente.
+
+MARGENS E TAXAS (tabela PARÂMETROS abaixo; a chave é o que você usa em atualizar_parametro):
+- markup_venda: persianas de tecido (Rolô, Double, Romana e a parte tecido do Motorizado). Venda = custo × markup × taxa_parcelamento².
+- markup_acabamento: bandô e barra dessas persianas; mesma fórmula, markup próprio.
+- markup_motorizacao: só o motor do Rolô Motorizado. Venda = custo × markup, SEM taxa de parcelamento.
+- markup_venda_pv_ph: PV e PH Alumínio 25mm ("o markup do PV"). Venda = custo × markup × taxa_parcelamento².
+- markup_venda_ph50, taxa_ph50, markup_bando_ph50, bando_ph50_venda_fixo: PH 50mm. Venda = custo × markup × taxa_ph50 (não usa o parcelamento geral); o bandô tem markup próprio e uma parcela fixa em R$ (bando_ph50_venda_fixo NÃO é markup).
+- taxa_parcelamento: juros do parcelamento; entra ao QUADRADO (2×) na venda de todos os modelos, exceto PH 50mm.
+- desconto_avista_pct: % de desconto sobre o total para pagamento à vista.
+- parceiro_* e custo_parceiro: quanto a loja PAGA à empresa parceira = custo de tabela × número (custo_parceiro é o padrão; os demais são por item: tecido, romana, ferragem, bandô, barra, kitbox, motor). NÃO mudam o preço do cliente; servem pra margem e pro fechamento com a parceira.
+- markup_atacado: tabela de atacado nova, ainda não entra em nenhum orçamento.
+- kitbox*, barra_*: são custos/fórmulas, não margens (só cite se pedirem).
+Quando pedirem "as margens / markups / taxas que usamos", liste TODOS os parâmetros de PARÂMETROS cuja chave começa com markup_, taxa_, desconto_ ou parceiro_ (mais custo_parceiro e bando_ph50_venda_fixo), sem omitir nenhum, agrupados por assunto: um título em **negrito** e, abaixo, uma tabela markdown:
+| Chave | Valor atual | O que significa |
+|---|---|---|
+Valor como está no banco, com vírgula decimal (2,8). "O que significa" em português simples e curto. Termine com uma frase dizendo que basta pedir a mudança (por voz ou texto) que você prepara a proposta pra ele conferir.
 
 Consulta: você PODE responder perguntas de preço sobre QUALQUER dado abaixo (ferragens, PH 50,
 bandôs, barra, instalação, motor) — cite o valor exato — E TAMBÉM sobre os orçamentos e vendas
@@ -233,7 +271,13 @@ admin um valor que já está aqui. Se o item não aparecer na lista, aí sim dig
           role: h.papel === 'user' ? 'user' : 'model',
           parts: [{ text: String(h.texto).slice(0, 1000) }],
         })),
-        { role: 'user', parts: [{ text: mensagem }] },
+        {
+          role: 'user',
+          parts: [
+            { text: mensagem.trim() || 'Pedido enviado por áudio — transcreva e execute.' },
+            ...(audio?.ok ? [{ inline_data: { mime_type: audio.mimeType, data: audio.data } }] : []),
+          ],
+        },
       ]
 
       const apiKey = Deno.env.get('GEMINI_API_KEY')!
@@ -243,34 +287,68 @@ admin um valor que já está aqui. Se o item não aparecer na lista, aí sim dig
         generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
       })
       // modelos em ordem de preferência (1.5 foi aposentado; mantém fallback)
-      let data: Record<string, unknown> | null = null
-      let ultimoErro: unknown = null
-      for (const modelo of ['gemini-3.7-flash', 'gemini-flash-latest']) {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: corpo },
-        )
-        const json = await res.json()
-        if (res.ok) { data = json; break }
-        ultimoErro = json
-        console.error(`precos-ia: modelo ${modelo} falhou`, JSON.stringify(json).slice(0, 300))
+      // Uma chamada ao Gemini com fallback de modelo. Devolve o JSON já interpretado
+      // (ou null se o texto não for JSON válido) ou o último erro HTTP.
+      async function perguntar(): Promise<{ parsed: Record<string, unknown> | null } | { erro: unknown }> {
+        let ultimoErro: unknown = null
+        for (const modelo of ['gemini-3.7-flash', 'gemini-flash-latest']) {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: corpo },
+          )
+          const json = await res.json()
+          if (res.ok) {
+            const texto = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+            return { parsed: extrairJson(String(texto)) }
+          }
+          ultimoErro = json
+          console.error(`precos-ia: modelo ${modelo} falhou`, JSON.stringify(json).slice(0, 300))
+        }
+        return { erro: ultimoErro }
       }
-      if (!data) return resposta(502, { error: 'Nenhum modelo Gemini respondeu', detalhe: ultimoErro })
 
-      const texto = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}'
-      let parsed: { resposta?: string; acoes?: unknown[] }
-      try { parsed = JSON.parse(texto) } catch { parsed = { resposta: 'Não consegui interpretar — pode reformular?', acoes: [] } }
+      // JSON inválido do modelo: tenta UMA vez de novo antes de desistir
+      let r = await perguntar()
+      if ('parsed' in r && !r.parsed) {
+        console.error('precos-ia: JSON inválido do modelo, repetindo uma vez')
+        r = await perguntar()
+      }
+      if ('erro' in r) return resposta(502, { error: 'Nenhum modelo Gemini respondeu', detalhe: r.erro })
+      const parsed = r.parsed ?? { resposta: 'Não consegui interpretar — pode reformular?', acoes: [] }
 
+      // Trava de sanidade: parâmetro fora do normal volta marcado, e o admin confirma de novo.
+      const atualPorChave = new Map((params ?? []).map((p: { chave: string; valor: unknown }) => [p.chave, Number(p.valor)] as [string, number]))
       const acoes = (Array.isArray(parsed.acoes) ? parsed.acoes : [])
         .filter((a) => a && typeof a === 'object' && TIPOS_VALIDOS.has((a as { tipo?: string }).tipo ?? ''))
-      return resposta(200, { resposta: parsed.resposta ?? '', acoes })
+        .slice(0, MAX_ACOES)
+        .map((a) => {
+          const acao = { ...(a as Record<string, unknown>) }
+          // a IA não decide a própria confirmação nem o lote
+          delete acao.suspeita; delete acao.motivo; delete acao.confirmada_suspeita; delete acao.atual
+          if (acao.tipo === 'atualizar_parametro') {
+            const atual = atualPorChave.get(String(acao.chave))
+            if (atual != null && Number.isFinite(atual)) acao.atual = atual
+            const v = avaliarParametro(String(acao.chave), atual, acao.valor)
+            if (v.invalido) { acao.suspeita = true; acao.motivo = v.invalido }
+            else if (v.suspeita) { acao.suspeita = true; acao.motivo = v.motivo }
+          }
+          return acao
+        })
+      return resposta(200, {
+        resposta: String(parsed.resposta ?? ''),
+        acoes,
+        transcricao: audio?.ok ? String(parsed.transcricao ?? '').trim() : '',
+      })
     }
 
     // ══════════════ MODO APLICAR ══════════════
     if (body.modo === 'aplicar') {
       const acoes = Array.isArray(body.acoes) ? body.acoes : []
       if (acoes.length === 0) return resposta(400, { error: 'Nenhuma ação para aplicar' })
-      if (acoes.length > 20) return resposta(400, { error: 'Máximo de 20 ações por vez' })
+      if (acoes.length > MAX_ACOES) return resposta(400, { error: `Máximo de ${MAX_ACOES} ações por vez` })
+      // todas as linhas de auditoria deste "Aplicar" levam o mesmo lote (vai dentro do `detalhe`,
+      // porque precos_auditoria não tem coluna própria) — o front usa pra "Desfazer tudo"
+      const loteId = crypto.randomUUID()
 
       // FASE 1: validar TODAS as ações antes de aplicar qualquer uma
       // (evita aplicação parcial: ou entra tudo, ou nada entra)
@@ -293,8 +371,14 @@ admin um valor que já está aqui. Se o item não aparecer na lista, aí sim dig
           const { count } = await qv
           if (!count) return resposta(400, { error: `Tecido não encontrado: ${acao.nome}` })
         } else if (tipo === 'atualizar_parametro') {
-          const { count } = await db.from('precos_parametros').select('chave', { count: 'exact', head: true }).eq('chave', String(acao.chave))
-          if (!count) return resposta(400, { error: `Parâmetro não encontrado: ${acao.chave}` })
+          const { data: atualRow } = await db.from('precos_parametros').select('valor').eq('chave', String(acao.chave)).maybeSingle()
+          if (!atualRow) return resposta(400, { error: `Parâmetro não encontrado: ${acao.chave}` })
+          const v = avaliarParametro(String(acao.chave), Number(atualRow.valor), acao.valor)
+          if (v.invalido) return resposta(400, { error: v.invalido })
+          // valor fora do normal só entra se o admin marcou a confirmação extra
+          if (v.suspeita && acao.confirmada_suspeita !== true) {
+            return resposta(400, { error: `Parâmetro ${acao.chave} precisa de confirmação extra: ${v.motivo}` })
+          }
         } else if (tipo === 'atualizar_preco_artigo') {
           if (!(Number(acao.preco) > 0)) return resposta(400, { error: `Preço inválido em ${acao.nome}` })
           const { count } = await db.from('precos_artigos').select('id', { count: 'exact', head: true })
@@ -347,7 +431,10 @@ admin um valor que já está aqui. Se o item não aparecer na lista, aí sim dig
       const aplicadas: string[] = []
       for (const acao of acoes) {
         const tipo = String(acao.tipo ?? '')
-        let detalhe: Record<string, unknown> = { ...acao }
+        // sinalizadores de tela não são parte do que foi aplicado
+        const { suspeita: _s, motivo: _m, atual: _a, confirmada_suspeita: _c, ...limpa } = acao
+        let detalhe: Record<string, unknown> = { ...limpa, lote_id: loteId }
+        if (_s === true && _c === true) detalhe.confirmada_suspeita = true
 
         if (tipo === 'criar_promocao') {
           const pct = Number(acao.desconto_pct)
@@ -472,7 +559,7 @@ admin um valor que já está aqui. Se o item não aparecer na lista, aí sim dig
       // está desligado. Ou seja, a falha era engolida e nada cobria. Preço
       // aplicado aqui já vale na hora, porque o motor lê as tabelas direto.
 
-      return resposta(200, { ok: true, aplicadas })
+      return resposta(200, { ok: true, aplicadas, lote_id: loteId })
     }
 
     return resposta(400, { error: 'modo deve ser "propor" ou "aplicar"' })
