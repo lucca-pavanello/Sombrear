@@ -14,6 +14,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { avaliarParametro, normalizarAcao, numeroDoValor } from '../../../src/lib/precos-ia/sanidade.ts'
 import { validarAudio } from '../../../src/lib/precos-ia/audio.ts'
 import { extrairJson } from '../../../src/lib/precos-ia/json.ts'
+import { gerarConteudo } from '../_shared/muse.ts'
 
 const MAX_ACOES = 60
 
@@ -281,42 +282,22 @@ admin um valor que já está aqui. Se o item não aparecer na lista, aí sim dig
         },
       ]
 
-      const apiKey = Deno.env.get('GEMINI_API_KEY')!
       const temAudio = !!audio?.ok
-      const corpo = JSON.stringify({
-        systemInstruction: { parts: [{ text: sistema }] },
-        contents,
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
-      })
-      // modelos em ordem de preferência (1.5 foi aposentado; mantém fallback)
-      // Uma chamada ao Gemini com fallback de modelo. Devolve o JSON já interpretado
-      // (ou null se o texto não for JSON válido) ou o último erro HTTP.
+      // Uma chamada ao Muse. Devolve o JSON já interpretado (ou null se o texto
+      // não for JSON válido) ou o erro.
       async function perguntar(): Promise<{ parsed: Record<string, unknown> | null } | { erro: true; audioIlegivel?: boolean }> {
-        for (const modelo of ['gemini-3.7-flash', 'gemini-flash-latest']) {
-          let res: Response
-          try {
-            res = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-                body: corpo,
-                signal: AbortSignal.timeout(45_000),
-              },
-            )
-          } catch (e) {
-            console.error(`precos-ia: modelo ${modelo} sem resposta`, e instanceof Error ? e.message : e)
-            continue
-          }
-          const json = await res.json().catch(() => null)
-          if (res.ok) {
-            const texto = json?.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-            return { parsed: extrairJson(String(texto)) }
-          }
-          console.error(`precos-ia: modelo ${modelo} falhou (${res.status})`, JSON.stringify(json).slice(0, 300))
-          // 400 com áudio no pedido = formato/arquivo que o Gemini não leu; o 2º modelo falharia igual
-          if (res.status === 400 && temAudio) return { erro: true, audioIlegivel: true }
+        const r = await gerarConteudo({
+          systemInstruction: { parts: [{ text: sistema }] },
+          contents,
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+        }, { maxTokens: 8000, timeoutMs: 45_000 })
+        if (r.ok) {
+          const texto = r.dados.candidates[0].content.parts.map((p) => p.text ?? '').join('')
+          return { parsed: extrairJson(texto) }
         }
+        console.error(`precos-ia: Muse falhou (${r.status})`, r.erro)
+        // 400 com áudio no pedido = arquivo que o modelo não leu
+        if (r.status === 400 && temAudio) return { erro: true, audioIlegivel: true }
         return { erro: true }
       }
 

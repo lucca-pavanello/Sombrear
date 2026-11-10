@@ -1,6 +1,7 @@
 /**
  * Edge Function: gemini-chat
- * Proxy para a API do Gemini — mantém a chave no servidor, fora do bundle.
+ * Proxy de IA — mantém a chave no servidor, fora do bundle. O nome é histórico:
+ * desde 10/11/2026 quem responde é o Muse (_shared/muse.ts), no formato do Gemini.
  * Usado pelo card de Insights do Agente IA (src/components/agente/InsightsAmanda.tsx).
  * O copiloto do dash saiu daqui para a `copilot-ia`, que tem ferramentas.
  *
@@ -8,6 +9,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { gerarConteudo } from '../_shared/muse.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,41 +39,20 @@ Deno.serve(async (req) => {
     const { data: perfil } = await admin.from('profiles').select('approved').eq('id', user.id).single()
     if (perfil?.approved !== true) return semAcesso(403, 'Acesso pendente de aprovação')
 
-    const apiKey = Deno.env.get('GEMINI_API_KEY')
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'GEMINI_API_KEY não configurada' }), {
-        status: 500,
+    const { contents } = await req.json()
+
+    // Resposta no formato do Gemini (candidates), que é o que os cards leem.
+    const r = await gerarConteudo({ contents })
+    if (!r.ok) {
+      console.error('[gemini-chat] Muse falhou:', r.status, r.erro)
+      return new Response(JSON.stringify({ error: r.erro }), {
+        status: r.status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    const { contents } = await req.json()
-
-    // Mesma estratégia do precos-ia: tenta modelos atuais em ordem
-    // (gemini-1.5-flash foi aposentado pelo Google — não usar)
-    let data: unknown = null
-    let status = 500
-    for (const modelo of ['gemini-3.7-flash', 'gemini-flash-latest']) {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents }),
-      })
-      data = await res.json()
-      status = res.status
-      if (res.ok) {
-        return new Response(JSON.stringify(data), {
-          status: 200,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-      }
-      // 404 = modelo indisponível → tenta o próximo; outros erros param aqui
-      if (res.status !== 404) break
-    }
-
-    return new Response(JSON.stringify({ error: data }), {
-      status,
+    return new Response(JSON.stringify(r.dados), {
+      status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (err) {

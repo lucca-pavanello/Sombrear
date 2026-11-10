@@ -18,12 +18,13 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { preflight, resposta } from '../_shared/resposta.ts'
+import { gerarConteudo } from '../_shared/muse.ts'
+import type { PedidoGemini } from '../../../src/lib/ia/museGemini.ts'
 import { ADMIN_EMAIL, ESTOQUE_EMAIL } from '../../../src/lib/constants.ts'
 import {
   MAX_BASE64, MAX_IMAGENS, MIMES_ACEITOS, sanitizarContagem,
 } from '../../../src/lib/estoque/contagem-resposta.ts'
 
-const MODELOS = ['gemini-3.7-flash', 'gemini-flash-latest']
 
 type Material = {
   id: string
@@ -82,33 +83,17 @@ ${lista}
 Responda apenas o JSON no formato pedido.`
 }
 
-async function chamarGemini(apiKey: string, corpo: unknown): Promise<{ ok: true; json: unknown } | { ok: false; status: number; erro: string }> {
-  let ultimo = { status: 500, erro: 'sem resposta' }
-  for (const modelo of MODELOS) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(corpo),
-        signal: AbortSignal.timeout(90_000),
-      },
-    )
-    const data = await res.json().catch(() => null)
-    if (res.ok) {
-      const txt = (data?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim()
-      if (!txt) return { ok: false, status: 502, erro: `resposta vazia (${data?.candidates?.[0]?.finishReason ?? 'sem motivo'})` }
-      try {
-        return { ok: true, json: JSON.parse(txt) }
-      } catch {
-        return { ok: false, status: 502, erro: 'JSON inválido do modelo' }
-      }
-    }
-    ultimo = { status: res.status, erro: JSON.stringify(data?.error ?? data).slice(0, 300) }
-    // 404 = modelo indisponível, tenta o próximo; o resto para aqui
-    if (res.status !== 404) break
+async function chamarModelo(corpo: PedidoGemini): Promise<{ ok: true; json: unknown } | { ok: false; status: number; erro: string }> {
+  // página cheia de caderno rende bastante JSON: teto de saída maior que o padrão
+  const r = await gerarConteudo(corpo, { maxTokens: 8000, timeoutMs: 90_000 })
+  if (!r.ok) return r
+  const txt = r.dados.candidates[0].content.parts.map((p) => p.text ?? '').join('').trim()
+  if (!txt) return { ok: false, status: 502, erro: `resposta vazia (${r.dados.candidates[0].finishReason})` }
+  try {
+    return { ok: true, json: JSON.parse(txt) }
+  } catch {
+    return { ok: false, status: 502, erro: 'JSON inválido do modelo' }
   }
-  return { ok: false, ...ultimo }
 }
 
 Deno.serve(async (req) => {
@@ -136,8 +121,7 @@ Deno.serve(async (req) => {
       perfil.email === ADMIN_EMAIL || perfil.email === ESTOQUE_EMAIL
     if (!temEstoque) return resposta(403, { ok: false, erro: 'sem acesso ao Estoque' })
 
-    const apiKey = Deno.env.get('GEMINI_API_KEY')
-    if (!apiKey) return resposta(500, { ok: false, erro: 'GEMINI_API_KEY não configurada' })
+    if (!Deno.env.get('META_API_KEY')) return resposta(500, { ok: false, erro: 'META_API_KEY não configurada' })
 
     const corpo = await req.json().catch(() => null)
     if (corpo?.tipo !== 'contagem') return resposta(400, { ok: false, erro: 'tipo inválido' })
@@ -165,7 +149,7 @@ Deno.serve(async (req) => {
     const lista = (materiais ?? []) as Material[]
     const ids = new Set(lista.map((m) => m.id))
 
-    const r = await chamarGemini(apiKey, {
+    const r = await chamarModelo({
       systemInstruction: { parts: [{ text: promptContagem(lista) }] },
       contents: [{
         role: 'user',
@@ -177,7 +161,7 @@ Deno.serve(async (req) => {
       generationConfig: { temperature: 0, responseMimeType: 'application/json', responseSchema: SCHEMA_SAIDA },
     })
     if (!r.ok) {
-      console.error('[estoque-foto] Gemini falhou:', r.status, r.erro)
+      console.error('[estoque-foto] Muse falhou:', r.status, r.erro)
       return resposta(r.status === 429 ? 429 : 502, { ok: false, erro: r.status === 429 ? 'limite' : 'modelo' })
     }
 
