@@ -13,7 +13,7 @@ import pytest
 from livekit.agents import AgentSession, llm as lk_llm
 
 from agenda import FUSO
-from equipe import URL_ORCAMENTO, AmandaCliente, abertura
+from equipe import URL_ORCAMENTO, AmandaCliente, abertura, telefone_falado
 from juiz import julgar
 from modelo import criar_llm
 
@@ -130,6 +130,33 @@ async def test_anota_o_contato_e_diz_que_o_time_chama() -> None:
         contato = session.current_agent.ligacao.contato
         assert contato["nome"].startswith("Marcos") and contato["telefone"] == "17991234567"
         await julgar(result, "Diz que o time vai mandar mensagem ou chamar no WhatsApp. Não promete data de instalação.")
+
+
+def test_telefone_falado_pelo_codigo() -> None:
+    assert telefone_falado("17996185177") == "dezessete, nove nove seis um oito, cinco um sete sete"
+    assert telefone_falado("1733041354") == "dezessete, três três zero quatro, um três cinco quatro"
+
+
+async def test_confere_o_telefone_com_a_frase_do_codigo() -> None:
+    """A ligação de 21/10: o cliente ditou certo e ela repetiu "nove nove seis um, oito cinco um, sete
+    sete sete"."""
+    modelo, session = await _sessao([
+        ("user", "Boa noite, tudo certo? Eu estou querendo uma persiana."),
+        ("assistant", "Tudo certo, sim. E é pra qual cômodo?"),
+        ("user", "Para minha sala."),
+        ("assistant", "Consegue me mandar uma foto da janela pelo WhatsApp? Aí a gente te passa tudo certinho."),
+        ("user", "Consigo sim."),
+        ("assistant", "Me diz seu nome e o telefone com DDD, que o time te chama no WhatsApp."),
+    ])
+    async with modelo, session:
+        result = await session.run(user_input="Luca, e o meu telefone é dezessete, nove nove seis um oito, cinco um sete sete.")
+        args = _chamou(result, "conferir_telefone")
+        assert args, "não conferiu pelo código"
+        assert "".join(c for c in args[-1]["telefone"] if c.isdigit()).removeprefix("55") == "17996185177"
+        fala = " ".join(e.item.text_content or "" for e in result.events
+                        if e.type == "message" and e.item.role == "assistant").lower()
+        assert "nove nove seis um oito, cinco um sete sete" in fala, fala
+        assert not _chamou(result, "anotar_contato"), "anotou antes do cliente confirmar"
 
 
 async def test_numero_conhecido_avisa_que_chama_nele_e_pede_so_o_nome() -> None:
