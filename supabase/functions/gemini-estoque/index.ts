@@ -1,12 +1,14 @@
 /**
  * Edge Function: gemini-estoque
  * Proxy para o chat de IA do módulo de estoque (useChatAPI.ts / useChat.ts).
- * Suporta function calling via REST API do Gemini.
+ * O nome é histórico: desde 10/11/2026 quem responde é o Muse (_shared/muse.ts),
+ * com o pedido e a resposta ainda no formato do Gemini, function calling incluso.
  *
  * Só usuário logado, aprovado e com acesso ao Estoque (_shared/acesso.ts).
  */
 
 import { exigirAcesso } from '../_shared/acesso.ts'
+import { gerarConteudo } from '../_shared/muse.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,49 +24,26 @@ Deno.serve(async (req) => {
     const recusa = await exigirAcesso(req, 'estoque')
     if (recusa) return recusa
 
-    const apiKey = Deno.env.get('GEMINI_API_KEY')
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'GEMINI_API_KEY não configurada' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    // Recebe o body completo que seria enviado à API do Gemini
-    // { model, contents, tools?, systemInstruction? }
+    // Recebe o pedido no formato do Gemini ({ contents, tools?, systemInstruction?,
+    // generationConfig? }) e devolve no mesmo formato (candidates), para o chat do
+    // Estoque não mudar. Quem responde é o Muse; o `model` que o cliente manda é ignorado.
     const body = await req.json()
-    const model = body.model ?? 'gemini-3.7-flash'
-    // o nome do modelo entra na URL: só aceita nome de modelo Gemini, nada de caminho
-    if (typeof model !== 'string' || !/^gemini-[a-z0-9.-]+$/.test(model)) {
-      return new Response(JSON.stringify({ error: 'modelo inválido' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: body.contents,
-        ...(body.tools ? { tools: body.tools } : {}),
-        ...(body.systemInstruction ? { systemInstruction: body.systemInstruction } : {}),
-        ...(body.generationConfig ? { generationConfig: body.generationConfig } : {}),
-      }),
+    const r = await gerarConteudo({
+      contents: body.contents,
+      tools: body.tools,
+      systemInstruction: body.systemInstruction,
+      generationConfig: body.generationConfig,
     })
 
-    const data = await res.json()
-
-    if (!res.ok) {
-      return new Response(JSON.stringify({ error: data }), {
-        status: res.status,
+    if (!r.ok) {
+      console.error('[gemini-estoque] Muse falhou:', r.status, r.erro)
+      return new Response(JSON.stringify({ error: r.erro }), {
+        status: r.status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    return new Response(JSON.stringify(data), {
+    return new Response(JSON.stringify(r.dados), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

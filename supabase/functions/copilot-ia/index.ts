@@ -22,6 +22,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { preflight, resposta } from '../_shared/resposta.ts'
+import { gerarConteudo } from '../_shared/muse.ts'
+import type { PedidoGemini } from '../../../src/lib/ia/museGemini.ts'
 import { ferramentasDeclaradas, instrucoes } from '../../../src/lib/copilot/prompt.ts'
 import { permissoesDoPerfil, semAcessoAosDados } from '../../../src/lib/copilot/permissoes.ts'
 import {
@@ -31,7 +33,6 @@ import {
 const MAX_RODADAS = 6
 const MAX_PERGUNTA = 2000
 const MAX_HISTORICO = 10
-const MODELOS = ['gemini-3.7-flash', 'gemini-flash-latest']
 
 type Parte = { text?: string; functionCall?: { name: string; args?: Record<string, unknown> }; [k: string]: unknown }
 type Conteudo = { role: 'user' | 'model'; parts: Parte[] }
@@ -46,29 +47,10 @@ async function lerTudo<T>(pagina: (de: number, ate: number) => PromiseLike<{ dat
   }
 }
 
-async function chamarGemini(apiKey: string, corpo: unknown): Promise<{ ok: true; conteudo: Conteudo } | { ok: false; status: number; erro: string }> {
-  let ultimo = { status: 500, erro: 'sem resposta' }
-  for (const modelo of MODELOS) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify(corpo),
-        signal: AbortSignal.timeout(45_000),
-      },
-    )
-    const data = await res.json().catch(() => null)
-    if (res.ok) {
-      const conteudo = data?.candidates?.[0]?.content as Conteudo | undefined
-      if (conteudo?.parts?.length) return { ok: true, conteudo: { role: 'model', parts: conteudo.parts } }
-      return { ok: false, status: 502, erro: `resposta vazia (${data?.candidates?.[0]?.finishReason ?? 'sem motivo'})` }
-    }
-    ultimo = { status: res.status, erro: JSON.stringify(data?.error ?? data).slice(0, 300) }
-    // 404 = modelo indisponível, tenta o próximo; o resto para aqui
-    if (res.status !== 404) break
-  }
-  return { ok: false, ...ultimo }
+async function chamarModelo(corpo: PedidoGemini): Promise<{ ok: true; conteudo: Conteudo } | { ok: false; status: number; erro: string }> {
+  const r = await gerarConteudo(corpo, { timeoutMs: 45_000 })
+  if (!r.ok) return r
+  return { ok: true, conteudo: { role: 'model', parts: r.dados.candidates[0].content.parts as Parte[] } }
 }
 
 Deno.serve(async (req) => {
@@ -101,8 +83,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    const apiKey = Deno.env.get('GEMINI_API_KEY')
-    if (!apiKey) return resposta(500, { ok: false, erro: 'GEMINI_API_KEY não configurada' })
+    if (!Deno.env.get('META_API_KEY')) return resposta(500, { ok: false, erro: 'META_API_KEY não configurada' })
 
     const corpo = await req.json().catch(() => null)
     const pergunta = String(corpo?.pergunta ?? '').trim().slice(0, MAX_PERGUNTA)
@@ -144,7 +125,7 @@ Deno.serve(async (req) => {
 
     for (let rodada = 0; rodada < MAX_RODADAS; rodada++) {
       const ultima = rodada === MAX_RODADAS - 1
-      const r = await chamarGemini(apiKey, {
+      const r = await chamarModelo({
         systemInstruction: { parts: [{ text: sistema }] },
         contents: conversa,
         tools: [{ functionDeclarations: ferramentasDeclaradas(perm) }],
@@ -153,7 +134,7 @@ Deno.serve(async (req) => {
         generationConfig: { temperature: 0.2 },
       })
       if (!r.ok) {
-        console.error('[copilot-ia] Gemini falhou:', r.status, r.erro)
+        console.error('[copilot-ia] Muse falhou:', r.status, r.erro)
         return resposta(r.status === 429 ? 429 : 502, { ok: false, erro: r.status === 429 ? 'limite' : 'modelo' })
       }
       conversa.push(r.conteudo)
