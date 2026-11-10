@@ -2,7 +2,11 @@
  * Edge Function: n8n-cotacao
  * Proxy autenticado para o webhook do n8n — mantém a URL e o token
  * fora do bundle JavaScript do browser.
+ *
+ * Só usuário logado, aprovado e com acesso a Orçamentos (_shared/acesso.ts).
  */
+
+import { exigirAcesso } from '../_shared/acesso.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,6 +19,9 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const recusa = await exigirAcesso(req, 'orcamento')
+    if (recusa) return recusa
+
     const webhookUrl = Deno.env.get('N8N_WEBHOOK_URL')
     if (!webhookUrl) {
       return new Response(JSON.stringify({ error: 'N8N_WEBHOOK_URL não configurada' }), {

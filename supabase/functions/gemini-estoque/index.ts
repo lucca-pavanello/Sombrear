@@ -2,7 +2,11 @@
  * Edge Function: gemini-estoque
  * Proxy para o chat de IA do módulo de estoque (useChatAPI.ts / useChat.ts).
  * Suporta function calling via REST API do Gemini.
+ *
+ * Só usuário logado, aprovado e com acesso ao Estoque (_shared/acesso.ts).
  */
+
+import { exigirAcesso } from '../_shared/acesso.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -15,6 +19,9 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const recusa = await exigirAcesso(req, 'estoque')
+    if (recusa) return recusa
+
     const apiKey = Deno.env.get('GEMINI_API_KEY')
     if (!apiKey) {
       return new Response(JSON.stringify({ error: 'GEMINI_API_KEY não configurada' }), {
@@ -27,6 +34,13 @@ Deno.serve(async (req) => {
     // { model, contents, tools?, systemInstruction? }
     const body = await req.json()
     const model = body.model ?? 'gemini-3.7-flash'
+    // o nome do modelo entra na URL: só aceita nome de modelo Gemini, nada de caminho
+    if (typeof model !== 'string' || !/^gemini-[a-z0-9.-]+$/.test(model)) {
+      return new Response(JSON.stringify({ error: 'modelo inválido' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
 
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
