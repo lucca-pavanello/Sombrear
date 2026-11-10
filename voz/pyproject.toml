@@ -6,6 +6,7 @@ dependencies = [
     "livekit-agents[google,openai,silero,turn-detector]~=1.8",
     "livekit-plugins-cartesia==1.8.8",
     "livekit-plugins-elevenlabs==1.8.8",
+    "livekit-plugins-noise-cancellation~=0.3.2",
     "num2words>=0.5.14",
     "psycopg[binary]>=3.2",
     "python-dotenv>=1.2.4",
