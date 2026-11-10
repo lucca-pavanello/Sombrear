@@ -21,7 +21,6 @@ import LeadTimeView from '@/components/estoque/LeadTimeView'
 import PontoPedidoView from '@/components/estoque/PontoPedidoView'
 import MoverItensView from '@/components/estoque/MoverItensView'
 import ConfiguracaoView from '@/components/estoque/ConfiguracaoView'
-import { ChatTrigger } from '@/components/estoque/chat/ChatTrigger'
 import { ChatDrawer } from '@/components/estoque/chat/ChatDrawer'
 import { ConfirmacaoAcao } from '@/components/estoque/chat/ConfirmacaoAcao'
 import { isAIEstoqueEnabled } from '@/components/estoque/chat/featureFlag'
@@ -42,7 +41,7 @@ interface Props {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-const SUBTAB_ORDER = ['visao-geral', 'entradas', 'vendas', 'produtos', 'fornecedores', 'localizacoes', 'sobras', 'mercado-livre', 'analises', 'acoes', 'configuracao', 'lead-time', 'mover', 'sugestao', 'ponto-pedido']
+const SUBTAB_ORDER = ['visao-geral', 'entradas', 'vendas', 'produtos', 'fornecedores', 'localizacoes', 'sobras', 'analises', 'acoes', 'configuracao', 'lead-time', 'mover', 'sugestao', 'ponto-pedido', 'mercado-livre']
 
 export default function TabEstoque({ toast, subTab }: Props) {
   const navigate = useNavigate()
@@ -136,9 +135,9 @@ export default function TabEstoque({ toast, subTab }: Props) {
       {subTab === 'produtos' && (
         <div className="space-y-5">
           <div>
-            <h3 className="font-display text-sm font-semibold">Produtos</h3>
+            <h3 className="font-display text-sm font-semibold">Materiais</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Cadastre tudo que você vende. Cada produto vira uma 'ficha' que o sistema usa pra todos os cálculos.
+              Tudo que a loja tem em estoque para produzir: tecidos, ferragens, acessórios e miudezas. Cada material vira uma 'ficha' que o sistema usa pra todos os cálculos.
             </p>
           </div>
           <EstoqueProdutosTable
@@ -271,9 +270,6 @@ export default function TabEstoque({ toast, subTab }: Props) {
 
       {isAIEstoqueEnabled() && (
         <>
-          <div className="flex justify-end">
-            <ChatTrigger />
-          </div>
           <ChatDrawer />
           <ConfirmacaoAcao />
         </>

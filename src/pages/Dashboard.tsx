@@ -31,7 +31,7 @@ import JanelaDados from '@/components/orcamentos/JanelaDados'
 
 const TabOrcamentos   = lazyComRecarga(() => import('@/components/tabs/TabOrcamentos'))
 const TabPlanilha     = lazyComRecarga(() => import('@/components/tabs/TabPlanilha'))
-// a aba Agente IA com as suas duas visões (Visão geral e Revisão diária)
+// a aba Agente IA com as suas duas visões (Visão geral e Ligações)
 const TabAgenteIA     = lazyComRecarga(() => import('@/components/agente/AbaAgente'))
 const TabCotacao      = lazyComRecarga(() => import('@/components/tabs/TabCotacao'))
 const TabCustos       = lazyComRecarga(() => import('@/components/tabs/TabCustos'))
@@ -539,14 +539,14 @@ export default function Dashboard() {
     { id: 'visao-geral',  label: 'Visão Geral',  icon: LayoutDashboard },
     { id: 'entradas',     label: 'Entradas',      icon: PackagePlus     },
     { id: 'vendas',       label: 'Vendas',        icon: ShoppingCart    },
-    { id: 'produtos',     label: 'Produtos',      icon: Package         },
+    { id: 'produtos',     label: 'Materiais',     icon: Package         },
     { id: 'fornecedores', label: 'Fornecedores',  icon: Truck           },
     { id: 'localizacoes', label: 'Localizações',  icon: MapPin          },
     { id: 'sobras',       label: 'Sobras',        icon: Scissors        },
-    { id: 'mercado-livre', label: 'Mercado Livre', icon: Store          },
     { id: 'analises',     label: 'Análises',      icon: BarChart2       },
     { id: 'acoes',        label: 'Ações',         icon: Zap             },
     { id: 'configuracao', label: 'Config.',        icon: Settings        },
+    { id: 'mercado-livre', label: 'Mercado Livre', icon: Store          },
   ], [])
 
   /* Quantos orçamentos recentes ainda esperam resposta. De propósito só os

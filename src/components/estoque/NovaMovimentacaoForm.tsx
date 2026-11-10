@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { X, TrendingUp, TrendingDown, RefreshCw, AlertOctagon, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useFecharNoFundo } from '@/hooks/useFecharNoFundo'
 import { useEstoqueProdutos } from '@/hooks/useEstoqueProdutos'
 import { useRegistrarMovimentacao } from '@/hooks/useEstoqueMovimentacoes'
 import type { EstoqueProduto } from '@/lib/supabase'
@@ -37,6 +38,7 @@ export default function NovaMovimentacaoForm({
   userId,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const fundoProps = useFecharNoFundo(onClose)
   const [tipo, setTipo] = useState<TipoMov>(tipoInicial)
   const [produtoId, setProdutoId] = useState(produtoInicial?.id ?? '')
   const [quantidade, setQuantidade] = useState('')
@@ -133,7 +135,7 @@ export default function NovaMovimentacaoForm({
       aria-modal="true"
       aria-labelledby="modal-title-mov"
       className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-[2px] px-4"
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      {...fundoProps}
     >
       <div
         ref={panelRef}
@@ -184,7 +186,7 @@ export default function NovaMovimentacaoForm({
 
           {/* Produto */}
           <div>
-            <label className={labelClass}>Produto *</label>
+            <label className={labelClass}>Material *</label>
             <CustomSelect
               value={produtoId}
               onChange={(v) => { setProdutoId(v); setErrors((er) => { const n = {...er}; delete n.produto; return n }) }}

@@ -315,12 +315,12 @@ export default function EstoqueProdutosTable({ toast, onNovoProduto, onEditar, o
   }
 
   async function handleDesativar(p: EstoqueProduto) {
-    if (!window.confirm(`Desativar "${p.nome}"? O produto não aparecerá mais no estoque.`)) return
+    if (!window.confirm(`Desativar "${p.nome}"? O material não aparecerá mais no estoque.`)) return
     try {
       await deactivate.mutateAsync(p.id)
-      toast('success', `Produto "${p.nome}" desativado.`)
+      toast('success', `Material "${p.nome}" desativado.`)
     } catch {
-      toast('error', 'Erro ao desativar produto.')
+      toast('error', 'Erro ao desativar material.')
     }
   }
 
@@ -395,22 +395,22 @@ export default function EstoqueProdutosTable({ toast, onNovoProduto, onEditar, o
             )}
           </div>
           {/* Export */}
-          <button onClick={() => exportCsv(`produtos-${Date.now()}.csv`, getExportRows())}
+          <button onClick={() => exportCsv(`materiais-${Date.now()}.csv`, getExportRows())}
             disabled={sorted.length === 0}
             className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-all disabled:opacity-40"
-            title={`Exportar ${sorted.length} produtos como CSV`}>
+            title={`Exportar ${sorted.length} materiais como CSV`}>
             <Download className="h-3.5 w-3.5" /> CSV
           </button>
-          <button onClick={() => exportXlsx(`produtos-${Date.now()}.xlsx`, getExportRows())}
+          <button onClick={() => exportXlsx(`materiais-${Date.now()}.xlsx`, getExportRows())}
             disabled={sorted.length === 0}
             className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-all disabled:opacity-40"
-            title={`Exportar ${sorted.length} produtos como XLSX`}>
+            title={`Exportar ${sorted.length} materiais como XLSX`}>
             <Download className="h-3.5 w-3.5" /> XLSX
           </button>
         </div>
         <button onClick={onNovoProduto} className={cn(tbl.addBtn, 'w-full sm:w-auto justify-center')}>
           <Plus className="h-4 w-4" />
-          Novo Produto
+          Novo material
         </button>
       </div>
 
@@ -606,14 +606,14 @@ export default function EstoqueProdutosTable({ toast, onNovoProduto, onEditar, o
                   <td colSpan={12} className="px-6 py-12 text-center">
                     <Package className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
                     <p className="text-sm font-medium text-muted-foreground">
-                      {search ? 'Nenhum produto encontrado' : 'Nenhum produto cadastrado ainda'}
+                      {search ? 'Nenhum material encontrado' : 'Nenhum material cadastrado ainda'}
                     </p>
                     {!search && Object.keys(filtros).length === 0 && (
                       <button
                         onClick={onNovoProduto}
                         className="mt-3 rounded-xl bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-brand hover:opacity-90 active:scale-95 transition-all"
                       >
-                        + Novo Produto
+                        + Novo material
                       </button>
                     )}
                   </td>
@@ -711,10 +711,10 @@ export default function EstoqueProdutosTable({ toast, onNovoProduto, onEditar, o
                     <div className="flex items-center justify-between gap-4">
                       <span>
                         {sorted.length > PAGE_SIZE
-                          ? <>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} de {sorted.length} produto{sorted.length !== 1 ? 's' : ''}{sorted.length < produtos.length ? <> <span className="text-muted-foreground/50">(de {produtos.length} total)</span></> : null}</>
+                          ? <>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} de {sorted.length} {sorted.length !== 1 ? 'materiais' : 'material'}{sorted.length < produtos.length ? <> <span className="text-muted-foreground/50">(de {produtos.length} total)</span></> : null}</>
                           : sorted.length < produtos.length
-                            ? <>{sorted.length} <span className="text-muted-foreground/50">de {produtos.length}</span> produto{sorted.length !== 1 ? 's' : ''}</>
-                            : <>Total — {sorted.length} produto{sorted.length !== 1 ? 's' : ''}</>
+                            ? <>{sorted.length} <span className="text-muted-foreground/50">de {produtos.length}</span> {sorted.length !== 1 ? 'materiais' : 'material'}</>
+                            : <>Total — {sorted.length} {sorted.length !== 1 ? 'materiais' : 'material'}</>
                         }
                       </span>
                       {totalPages > 1 && (
