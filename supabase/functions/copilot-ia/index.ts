@@ -10,7 +10,9 @@
  * Segurança (padrão da classificar-conversas):
  *  - só usuário logado e aprovado em `profiles`;
  *  - as tabelas são lidas com o token de quem pergunta, então vale o RLS dele;
- *  - telefone é lido só para casar venda com lead e nunca vai para a IA.
+ *  - telefone é lido só para casar venda com lead e nunca vai para a IA;
+ *  - orçamentos em aberto e desfechos vêm junto das vendas; as contas de venda seguem
+ *    filtrando `fechado` (ehVenda), então os números de sempre não mudam.
  *
  * Pedido:   { pergunta: string, historico?: {role:'user'|'model', text}[], responsavel?: string }
  * Resposta: { ok: true, resposta } | { ok: false, erro }
@@ -103,8 +105,8 @@ Deno.serve(async (req) => {
     const [orcamentos, leads] = await Promise.all([
       lerTudo<VendaCopilot>((de, ate) => {
         let q = doUsuario.from('orcamentos')
-          .select('id, cliente, valor_cobrado, valor_venda, instalacao, fechado, data_pedido, created_at, pedido_id, modelo, responsavel, origem, telefone, margem')
-          .eq('fechado', true)
+          .select('id, cliente, valor_cobrado, valor_venda, instalacao, fechado, data_pedido, created_at, pedido_id, modelo, responsavel, origem, telefone, margem, ' +
+            'desfecho, desfecho_em, desfecho_motivo')
         if (responsavel) q = q.eq('responsavel', responsavel)
         return q.order('id').range(de, ate)
       }),

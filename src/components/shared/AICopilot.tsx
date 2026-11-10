@@ -1,17 +1,55 @@
 import { useState, useRef, useEffect, memo, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { X, Send, Sparkles, RotateCcw, Mic, MicOff, AlertCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useGemini } from '@/hooks/useGemini'
 import { blocosDaResposta, partesDoTexto, type Bloco } from '@/lib/respostaIA'
 
-// Só pergunta que as ferramentas do copilot respondem (lista combinada com a
-// Funcionalidade em 30/09): número do período, modelo, lead quente sem venda, lead parado.
-const SUGGESTIONS = [
+// Só pergunta que as ferramentas do copilot respondem. A lista muda com a área do dash em que
+// a pessoa está (rota); fora das áreas conhecidas vale a lista de vendas e leads.
+type Area = 'orcamentos' | 'vendas' | 'agente-ia' | 'geral'
+
+const SUGESTOES_GERAIS = [
   'Qual modelo mais vendeu este mês?',
   'Quem está quente e ainda não fechou?',
   'Como está a margem deste mês contra o mês passado?',
   'Quais leads estão parados há mais de 7 dias?',
 ]
+
+const AREAS: Record<Area, { sugestoes: string[]; dica: string }> = {
+  orcamentos: {
+    dica: 'Pergunte sobre a fila de orçamentos',
+    sugestoes: [
+      'Quanto tenho parado em orçamentos em aberto?',
+      'Quais orçamentos estão há mais de 30 dias sem resposta?',
+      'Por que perdemos orçamentos este mês?',
+      'Quais são os 5 maiores orçamentos em aberto?',
+    ],
+  },
+  vendas: {
+    dica: 'Pergunte sobre as vendas',
+    sugestoes: SUGESTOES_GERAIS,
+  },
+  'agente-ia': {
+    dica: 'Pergunte sobre os leads',
+    sugestoes: [
+      'Quem está quente e ainda não fechou?',
+      'Quais leads estão parados há mais de 7 dias?',
+      'Qual canal trouxe mais leads este mês?',
+      'Qual canal converte melhor?',
+    ],
+  },
+  geral: { dica: 'Pergunte, por exemplo', sugestoes: SUGESTOES_GERAIS },
+}
+
+/** Rota -> área. As abas de orçamento moram em /orcamentos/* e também em rotas soltas legadas. */
+function areaDaRota(pathname: string): Area {
+  const raiz = pathname.replace(/^\/+/, '').split('/')[0]
+  if (['orcamentos', 'acompanhar', 'planilha', 'calcular-orcamento', 'calculo-custo', 'simulador'].includes(raiz)) return 'orcamentos'
+  if (['fechamento', 'relatorios', 'analises'].includes(raiz)) return 'vendas'
+  if (raiz === 'agente-ia') return 'agente-ia'
+  return 'geral'
+}
 
 interface Props {
   open: boolean
@@ -105,6 +143,8 @@ const hasSpeech = typeof window !== 'undefined' && (!!window.SpeechRecognition |
 
 function AICopilot({ open, onClose, responsavel }: Props) {
   const { messages, isLoading, sendMessage, repetir, clearChat } = useGemini()
+  const { pathname } = useLocation()
+  const area = AREAS[areaDaRota(pathname)]
   const [input, setInput] = useState('')
   const [isListening, setIsListening] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -234,10 +274,10 @@ function AICopilot({ open, onClose, responsavel }: Props) {
           {messages.length === 0 && !isLoading && (
             <div className="space-y-3">
               <p className="text-center text-[11px] font-semibold uppercase tracking-wider text-muted-foreground pt-2">
-                Pergunte, por exemplo
+                {area.dica}
               </p>
               <div className="grid grid-cols-1 gap-1.5">
-                {SUGGESTIONS.map(s => (
+                {area.sugestoes.map(s => (
                   <button
                     key={s}
                     data-sugestao

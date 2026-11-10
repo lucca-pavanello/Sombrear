@@ -14,6 +14,7 @@
  */
 
 import { chavePedido, dataVenda, ehTeste, ehVenda, receita, type VendaMinima } from '../analises/venda.ts'
+import { MOTIVOS_PERDA, faixaEspera } from '../desfecho.ts'
 
 export type VendaCopilot = VendaMinima & {
   modelo?: string | null
@@ -21,6 +22,10 @@ export type VendaCopilot = VendaMinima & {
   origem?: string | null
   telefone?: string | null
   margem?: number | null
+  /** 'fechou' | 'perdido' | 'sumiu' | null (null = ainda esperando resposta); ver src/lib/desfecho.ts */
+  desfecho?: string | null
+  desfecho_em?: string | null
+  desfecho_motivo?: string | null
 }
 
 export type LeadCopilot = {
@@ -335,6 +340,111 @@ export function verLead(leads: LeadCopilot[], orcs: VendaCopilot[], termo: strin
   }
 }
 
+// ── Orçamentos em aberto e desfechos ─────────────────────────────────────────
+// Orçamento em aberto = a fila do "Acompanhar": sem desfecho e ainda não fechado.
+// Venda (fechado) é coisa à parte: nenhuma conta de venda olha para estas linhas.
+
+const semAcento = (v: string | null | undefined) =>
+  String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
+
+const ehAberto = (o: VendaCopilot) => !o.desfecho && !o.fechado && !ehTeste(o)
+
+type Cotacao = { itens: VendaCopilot[]; valor: number }
+
+/** Itens do mesmo pedido contam como UM orçamento, com os valores somados (como o Semanário). */
+function agruparPedidos(lista: VendaCopilot[]): Cotacao[] {
+  const mapa = new Map<string, Cotacao>()
+  for (const o of lista) {
+    const k = chavePedido(o)
+    const c = mapa.get(k) ?? { itens: [], valor: 0 }
+    c.itens.push(o)
+    c.valor += receita(o)
+    mapa.set(k, c)
+  }
+  return [...mapa.values()]
+}
+
+export type FiltroAbertos = { responsavel?: string | null; modelo?: string | null; limite?: number; ordem?: 'valor' | 'antigos' }
+
+export function orcamentosEmAberto(orcs: VendaCopilot[], f: FiltroAbertos = {}, hoje = hojeCasa()) {
+  const resp = semAcento(f.responsavel)
+  const mod = semAcento(f.modelo)
+  const itens = orcs.filter((o) => ehAberto(o)
+    && (!resp || semAcento(o.responsavel).includes(resp))
+    && (!mod || semAcento(o.modelo).includes(mod)))
+  const cotacoes = agruparPedidos(itens).map((c) => ({
+    cliente: c.itens[0].cliente?.trim() || 'sem nome',
+    modelo: [...new Set(c.itens.map((o) => (o.modelo ?? '').trim()).filter(Boolean))].join(', ') || 'sem modelo',
+    valor: arred(c.valor),
+    dias_parado: Math.max(...c.itens.map((o) => diasDesde(o.created_at, hoje) ?? 0)),
+    responsavel: c.itens[0].responsavel?.trim() || 'sem responsável',
+  }))
+  const faixas = new Map<string, { faixa: string; orcamentos: number; valor: number }>()
+  for (const rotulo of ['até 7 dias', '8 a 30 dias', 'mais de 30 dias']) faixas.set(rotulo, { faixa: rotulo, orcamentos: 0, valor: 0 })
+  for (const c of cotacoes) {
+    const l = faixas.get(faixaEspera(c.dias_parado).rotulo)!
+    l.orcamentos++
+    l.valor += c.valor
+  }
+  const quer = f.limite != null && Number.isFinite(Number(f.limite)) ? Math.min(Math.max(Math.round(Number(f.limite)), 1), 20) : 0
+  const lista = quer
+    ? [...cotacoes]
+      .sort(f.ordem === 'antigos' ? (a, b) => b.dias_parado - a.dias_parado || b.valor - a.valor : (a, b) => b.valor - a.valor || b.dias_parado - a.dias_parado)
+      .slice(0, quer)
+    : []
+  return {
+    orcamentos_em_aberto: cotacoes.length,
+    valor_total: arred(cotacoes.reduce((s, c) => s + c.valor, 0)),
+    por_faixa_de_espera: [...faixas.values()].map((l) => ({ ...l, valor: arred(l.valor) })),
+    filtros: { responsavel: f.responsavel?.trim() || null, modelo: f.modelo?.trim() || null },
+    ...(quer ? { ordenado_por: f.ordem === 'antigos' ? 'mais antigos' : 'maior valor', mostrando: lista.length, orcamentos: lista } : {}),
+  }
+}
+
+/**
+ * Desfechos marcados no período (pelo dia de `desfecho_em`): fechou / não fechou / sumiu.
+ * Conversão entre quem respondeu = fechou ÷ (fechou + não fechou); "sumiu" não respondeu.
+ */
+export function desfechosDoPeriodo(orcs: VendaCopilot[], p: Periodo) {
+  const marcados = orcs.filter((o) => !!o.desfecho && !ehTeste(o) && noDia(o.desfecho_em, p))
+  const conta = { fechou: 0, perdido: 0, sumiu: 0 }
+  const valor = { fechou: 0, perdido: 0, sumiu: 0 }
+  const motivos = new Map<string, { motivo: string; orcamentos: number; valor: number }>()
+  for (const g of agruparPedidos(marcados)) {
+    const d = g.itens[0].desfecho as keyof typeof conta
+    if (!(d in conta)) continue
+    conta[d]++
+    valor[d] += g.valor
+    if (d === 'perdido') {
+      const bruto = (g.itens[0].desfecho_motivo ?? '').trim()
+      const chave = semAcento(bruto) || 'sem motivo informado'
+      const rotulo = MOTIVOS_PERDA.find((m) => semAcento(m) === chave) ?? (bruto || 'sem motivo informado')
+      const m = motivos.get(chave) ?? { motivo: rotulo, orcamentos: 0, valor: 0 }
+      m.orcamentos++
+      m.valor += g.valor
+      motivos.set(chave, m)
+    }
+  }
+  const respondidos = conta.fechou + conta.perdido
+  const todos = respondidos + conta.sumiu
+  return {
+    periodo: p,
+    fechou: conta.fechou,
+    nao_fechou: conta.perdido,
+    sumiu: conta.sumiu,
+    total_com_desfecho: todos,
+    respondidos,
+    conversao_entre_respondidos_pct: respondidos > 0 ? arred((conta.fechou / respondidos) * 100, 1) : null,
+    conversao_sobre_todos_pct: todos > 0 ? arred((conta.fechou / todos) * 100, 1) : null,
+    valor_fechou: arred(valor.fechou),
+    valor_nao_fechou: arred(valor.perdido),
+    valor_sumiu: arred(valor.sumiu),
+    motivos_de_perda: [...motivos.values()]
+      .map((m) => ({ ...m, valor: arred(m.valor) }))
+      .sort((a, b) => b.orcamentos - a.orcamentos || b.valor - a.valor),
+  }
+}
+
 // ── Conta ────────────────────────────────────────────────────────────────────
 
 /**
@@ -405,6 +515,17 @@ export function rodarFerramenta(nome: string, args: Record<string, unknown>, dad
       return leadsParados(dados.leads, dados.orcamentos, Number(args.dias ?? 7), Number(args.limite ?? 10), hoje)
     case 'ver_lead':
       return verLead(dados.leads, dados.orcamentos, String(args.termo ?? ''), hoje)
+    case 'orcamentos_em_aberto':
+      return orcamentosEmAberto(dados.orcamentos, {
+        responsavel: typeof args.responsavel === 'string' ? args.responsavel : null,
+        modelo: typeof args.modelo === 'string' ? args.modelo : null,
+        limite: args.limite == null ? undefined : Number(args.limite),
+        ordem: args.ordem === 'antigos' ? 'antigos' : 'valor',
+      }, hoje)
+    case 'desfechos_do_periodo': {
+      const p = periodo()
+      return p ? desfechosDoPeriodo(dados.orcamentos, p) : semPeriodo
+    }
     case 'calcular':
       return calcular(String(args.expressao ?? ''))
     default:
