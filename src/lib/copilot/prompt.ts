@@ -1,11 +1,18 @@
 /**
- * Instruções e ferramentas do copilot. Import-free: carregado pela Edge Function
- * `copilot-ia` e pelos testes. As regras vêm do chat da TECPAV e do Garimpo, onde
+ * Instruções e ferramentas do copilot. Só importa `./permissoes.ts` (sem alias `@/`):
+ * carregado pela Edge Function `copilot-ia` e pelos testes. As regras vêm do chat da TECPAV e do Garimpo, onde
  * cada uma nasceu de um erro real (conta de cabeça, número inventado, período sem dizer
  * qual, instrução escondida no texto de uma conversa).
  */
 
-export function instrucoes(hoje: string, diaDaSemana: string): string {
+import { ferramentaPermitida, type PermissoesCopilot } from './permissoes.ts'
+
+const TUDO: PermissoesCopilot = { vendas: true, leads: true, margem: true }
+
+/** Instruções do sistema, coerentes com as ferramentas que o usuário realmente tem. */
+export function instrucoes(hoje: string, diaDaSemana: string, perm: PermissoesCopilot = TUDO): string {
+  const v = perm.vendas
+  const l = perm.leads
   return [
     'Você é o copiloto do dash da Sombrear, loja de cortinas e persianas sob medida em São José do Rio Preto.',
     `Hoje é ${hoje} (${diaDaSemana}), no horário de Brasília.`,
@@ -14,13 +21,18 @@ export function instrucoes(hoje: string, diaDaSemana: string): string {
     'nome, data ou quantidade. Se a ferramenta não trouxe, diga que o dado não está no dash.',
     'Nunca faça conta de cabeça: soma, diferença, média ou porcentagem que a ferramenta não devolveu pronta vai pela ferramenta calcular.',
     'Pergunta sem período: assuma um período razoável (este mês, por padrão) e diga qual usou.',
-    'Mês em andamento contra mês fechado: use comparar_periodos, que corta o anterior no mesmo trecho, e diga isso.',
-    'Venda é pedido fechado no Semanário; itens do mesmo pedido são uma venda só. Receita é o valor cobrado.',
-    'Orçamento em aberto NÃO é venda: é preço passado que ainda espera resposta (fila do Acompanhar). Nunca some em aberto na receita',
-    'nem chame de venda. Todo orçamento acaba em um desfecho: fechou (virou venda), não fechou (com motivo) ou sumiu (parou de responder).',
-    'Itens do mesmo pedido contam como um orçamento só. Para fila, valor parado e tempo de espera use orcamentos_em_aberto;',
-    'para "por que perdemos" e taxa de fechamento dos orçamentos use desfechos_do_periodo.',
-    'Lead é quem conversou com a Stella no WhatsApp. Conversão por canal é lead que comprou dividido por lead do canal.',
+    ...(v ? [
+      'Mês em andamento contra mês fechado: use comparar_periodos, que corta o anterior no mesmo trecho, e diga isso.',
+      'Venda é pedido fechado no Semanário; itens do mesmo pedido são uma venda só. Receita é o valor cobrado.',
+      'Orçamento em aberto NÃO é venda: é preço passado que ainda espera resposta (fila do Acompanhar). Nunca some em aberto na receita',
+      'nem chame de venda. Todo orçamento acaba em um desfecho: fechou (virou venda), não fechou (com motivo) ou sumiu (parou de responder).',
+      'Itens do mesmo pedido contam como um orçamento só. Para fila, valor parado e tempo de espera use orcamentos_em_aberto;',
+      'para "por que perdemos" e taxa de fechamento dos orçamentos use desfechos_do_periodo.',
+    ] : ['Este usuário NÃO tem acesso a vendas nem a orçamentos: se perguntarem, diga que o acesso dele não inclui esses dados.']),
+    ...(l ? [
+      'Lead é quem conversou com a Stella no WhatsApp.' + (v ? ' Conversão por canal é lead que comprou dividido por lead do canal.' : ''),
+    ] : ['Este usuário NÃO tem acesso aos leads do Agente IA: se perguntarem, diga que o acesso dele não inclui esses dados.']),
+    ...(perm.margem ? [] : ['Margem, custo e lucro não estão disponíveis para este usuário: se perguntarem, diga que só administradores veem isso.']),
     '',
     'Formato: português do Brasil, direto, no máximo 6 linhas ou uma tabela de até 8 linhas.',
     'Markdown simples: **negrito**, listas e tabela. Sem títulos, sem emoji, sem travessão.',
@@ -42,7 +54,7 @@ const PERIODO = {
   required: ['inicio', 'fim'],
 }
 
-/** No formato `functionDeclarations` da API do Gemini. */
+/** No formato `functionDeclarations` da API do Gemini (lista completa; `ferramentasDeclaradas` filtra por permissão). */
 export const FERRAMENTAS = [
   {
     name: 'numeros_do_periodo',
@@ -114,3 +126,16 @@ export const FERRAMENTAS = [
     parameters: { type: 'object', properties: { expressao: { type: 'string' } }, required: ['expressao'] },
   },
 ]
+
+/** Descrições sem menção a margem, para quem não é admin. */
+const SEM_MARGEM: Record<string, string> = {
+  numeros_do_periodo: 'Receita, pedidos, itens e ticket por pedido das vendas fechadas no período.',
+  comparar_periodos: 'Compara dois períodos (ex.: este mês x mês anterior) com variação em %. Corta o anterior no mesmo trecho quando o atual está em andamento.',
+}
+
+/** Só as ferramentas que o usuário pode usar, com descrição coerente (sem margem para quem não vê margem). */
+export function ferramentasDeclaradas(perm: PermissoesCopilot) {
+  return FERRAMENTAS
+    .filter((f) => ferramentaPermitida(f.name, perm))
+    .map((f) => (!perm.margem && SEM_MARGEM[f.name] ? { ...f, description: SEM_MARGEM[f.name] } : f))
+}

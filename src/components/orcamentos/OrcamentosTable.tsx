@@ -87,11 +87,12 @@ function FechadoCheckbox({ orcamento, toast }: { orcamento: Orcamento; toast: To
       desfecho: orcamento.desfecho ?? null,
       desfecho_em: orcamento.desfecho_em ?? null,
       desfecho_por: orcamento.desfecho_por ?? null,
+      desfecho_motivo: orcamento.desfecho_motivo ?? null,
     }
     const patch = novoEstado
-      ? { fechado: true, desfecho: 'fechou', desfecho_em: new Date().toISOString(), desfecho_por: profile?.email ?? null }
+      ? { fechado: true, desfecho: 'fechou', desfecho_em: new Date().toISOString(), desfecho_por: profile?.email ?? null, desfecho_motivo: null }
       : wasFechado && orcamento.desfecho === 'fechou'
-        ? { fechado: false, desfecho: null, desfecho_em: null, desfecho_por: null }
+        ? { fechado: false, desfecho: null, desfecho_em: null, desfecho_por: null, desfecho_motivo: null }
         : { fechado: false }
     update({ id: orcamento.id, ...patch }, {
       onSuccess: () => {

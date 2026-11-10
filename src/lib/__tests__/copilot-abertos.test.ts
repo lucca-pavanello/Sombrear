@@ -86,6 +86,16 @@ describe('orcamentos_em_aberto', () => {
     expect(JSON.stringify(maiores)).not.toMatch(/999990001|telefone/)
   })
 
+  it('dias parado do pedido segue o item MAIS RECENTE, como o card do Acompanhar', () => {
+    const pedido = [
+      aberto({ cliente: 'Eva', pedido_id: 'P9', valor_venda: 100, created_at: '2026-09-01T12:00:00Z' }),
+      aberto({ cliente: 'Eva', pedido_id: 'P9', valor_venda: 100, created_at: '2026-09-17T12:00:00Z' }),
+    ]
+    const r = orcamentosEmAberto(pedido, { limite: 1 }, HOJE)
+    expect(r.orcamentos![0].dias_parado).toBe(3)
+    expect(r.por_faixa_de_espera[0]).toEqual({ faixa: 'até 7 dias', orcamentos: 1, valor: 200 })
+  })
+
   it('filtra por responsável e modelo sem ligar para acento ou caixa', () => {
     expect(orcamentosEmAberto(fila, { responsavel: 'arthur' }, HOJE).orcamentos_em_aberto).toBe(2)
     expect(orcamentosEmAberto(fila, { modelo: 'ROLO' }, HOJE).orcamentos_em_aberto).toBe(2)

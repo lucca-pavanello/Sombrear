@@ -6,7 +6,11 @@ import { cn } from '@/lib/utils'
 import { usePrecosMutations } from '@/hooks/usePrecos'
 import { formatarSegundos, useGravadorAudio, type AudioGravado } from '@/hooks/useGravadorAudio'
 import { blocosDaResposta, partesDoTexto, type Bloco } from '@/lib/respostaIA'
-import { ultimoLote, type LinhaAuditoria } from '@/lib/precos-ia/lotes'
+import {
+  ACAO_DESFAZER_LOTE, classificarAlvo, classificarApagar, classificarInserir, lotesDesfeitos, pendentesDoLote,
+  planoReversao, separarLote, ultimoLote,
+  type AlvoReversao, type EstadoReversao, type LinhaAuditoria,
+} from '@/lib/precos-ia/lotes'
 import { Button } from '@/components/ui/primitives'
 import { campo } from '@/components/shared/estilos'
 
@@ -70,6 +74,10 @@ function descreverAcao(a: Acao): string {
     }
     case 'atualizar_romana':
       return `Romana ${a.largura}×${a.altura}m → R$ ${Number(a.custo).toFixed(2)}`
+    case 'desfazer_lote': {
+      const n = Array.isArray(a.revertidas) ? a.revertidas.length : 0
+      return `Pedido desfeito (${n} alteraç${n === 1 ? 'ão' : 'ões'} revertida${n === 1 ? '' : 's'}${a.completo === false ? ', parcial' : ''})`
+    }
     case 'editar_grade': {
       const depois = (a.depois ?? {}) as Record<string, unknown>
       const campos = Object.entries(depois).map(([k, v]) => `${k} → ${v}`).join(', ')
@@ -90,10 +98,12 @@ const TIPOS_REVERSIVEIS = new Set([
   'atualizar_motor_estrutura', 'atualizar_romana',
 ])
 
-const semId = (row: Record<string, unknown>) => {
-  const { id: _id, ...resto } = row
-  return resto
+/** Alguém mexeu no valor depois do lote: não pisamos em cima. */
+class ConflitoErro extends Error {
+  constructor() { super('conflito') }
 }
+const MSG_CONFLITO = 'Alterado depois — não desfiz. Confira o valor atual na tabela.'
+const MSG_CONFLITO_LISTA = 'Alterado depois, NÃO desfiz (o valor atual não é mais o que o pedido deixou):'
 
 /** Valor que existia antes da mudança — vem do 'antes' gravado na auditoria. */
 function valorAnterior(detalhe: Record<string, unknown>): string | null {
@@ -200,116 +210,159 @@ export default function PrecosIA({ toast }: Props) {
   const [aplicando, setAplicando] = useState(false)
   const [desfazendo, setDesfazendo] = useState<number | null>(null)
   const [desfazendoLote, setDesfazendoLote] = useState(false)
+  const loteEmAndamento = useRef(false)
+  /** lotes desfeitos cuja marca não gravou no histórico (vale só até recarregar a página) */
+  const [desfeitosLocal, setDesfeitosLocal] = useState<string[]>([])
   const fimRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const { updateRow, insertRow, deleteRow } = usePrecosMutations()
 
   const gravador = useGravadorAudio({ maxSegundos: 90, aoFinalizar: audio => { void enviar(audio) } })
 
-  /** Reverte UMA alteração da auditoria. Lança erro se não der (o chamador decide o que dizer). */
-  async function reverter(a: Auditoria): Promise<void> {
-    const d = a.detalhe
-    if (a.acao === 'editar_grade') {
-      await updateRow(String(d.tabela), d.match as Record<string, unknown>,
-        d.antes as Record<string, unknown>, d.depois as Record<string, unknown>)
-    } else if (a.acao === 'excluir_grade') {
-      await insertRow(String(d.tabela), semId(d.antes as Record<string, unknown>))
-    } else if (a.acao === 'criar_promocao' && d.promo_id != null) {
-      await deleteRow('precos_promocoes', { id: d.promo_id })
-    } else if (a.acao === 'remover_promocao' && d.antes) {
-      await insertRow('precos_promocoes', semId(d.antes as Record<string, unknown>))
-    } else if (a.acao === 'atualizar_preco_tecido' && Array.isArray(d.antes)) {
-      for (const linha of d.antes as { id: number; preco: number }[]) {
-        await updateRow('precos_tecidos', { id: linha.id }, { preco: linha.preco }, { preco: d.preco })
+  /** Linhas atuais de uma tabela que casam com `match` (null casa com IS NULL). */
+  async function linhasAtuais(tabela: string, match: Record<string, unknown>, colunas: string[]): Promise<Record<string, unknown>[]> {
+    let q = supabase.from(tabela).select(colunas.length ? colunas.join(',') : '*')
+    for (const [k, v] of Object.entries(match)) q = v == null ? q.is(k, null) : q.eq(k, v as never)
+    const { data, error } = await q
+    if (error) throw error
+    return (data ?? []) as unknown as Record<string, unknown>[]
+  }
+
+  /**
+   * Reverte UMA alteração da auditoria — SÓ se o valor atual ainda é o que o lote deixou.
+   * Devolve 'revertido' ou 'ja' (já estava revertido: nada escrito). Lança ConflitoErro se
+   * alguém alterou depois, ou Error('Essa alteração…') se faltam dados.
+   */
+  async function reverter(a: Auditoria): Promise<'revertido' | 'ja'> {
+    const plano = planoReversao(a)
+    if (!plano) throw new Error('Essa alteração não tem dados suficientes para desfazer')
+
+    if (plano.tipo === 'atualizar') {
+      // classifica TODOS os alvos antes de escrever: conflito num deles não deixa a ação pela metade
+      const checks: { alvo: AlvoReversao; estado: EstadoReversao }[] = []
+      for (const alvo of plano.alvos) {
+        const colunas = [...new Set([...Object.keys(alvo.antes), ...Object.keys(alvo.depois)])]
+        checks.push({ alvo, estado: classificarAlvo(alvo, await linhasAtuais(alvo.tabela, alvo.match, colunas)) })
       }
-    } else if (a.acao === 'atualizar_parametro' && d.antes) {
-      await updateRow('precos_parametros', { chave: d.chave },
-        { valor: (d.antes as { valor: number }).valor }, { valor: d.valor })
-    } else if (a.acao === 'atualizar_preco_artigo' && d.antes) {
-      await updateRow('precos_artigos', { categoria: d.categoria, nome: d.nome },
-        { preco: (d.antes as { preco: number }).preco }, { preco: d.preco })
-    } else if (a.acao === 'atualizar_componente_ferragem' && d.antes) {
-      await updateRow('precos_ferragem_componentes', { id: d.id },
-        { valor: (d.antes as { valor: number }).valor }, { valor: d.valor })
-    } else if (a.acao === 'atualizar_ph50' && d.antes) {
-      const campoPh = String(d.campo)
-      await updateRow('precos_ph50', { modelo: d.modelo, cor: d.cor },
-        { [campoPh]: (d.antes as Record<string, number>)[campoPh] }, { [campoPh]: d.valor })
-    } else if (a.acao === 'atualizar_bando_param' && d.antes) {
-      const campoBando = String(d.campo)
-      await updateRow('precos_bandos_params', { cor: d.cor },
-        { [campoBando]: (d.antes as Record<string, number>)[campoBando] }, { [campoBando]: d.valor })
-    } else if (a.acao === 'atualizar_colocacao' && d.antes) {
-      await updateRow('precos_colocacao', { id: d.id },
-        { preco: (d.antes as { preco: number }).preco }, { preco: d.preco })
-    } else if (a.acao === 'atualizar_barra_faixa' && d.antes) {
-      await updateRow('precos_barra_faixas', { largura_min: d.largura_min },
-        { qtd_presilhas: (d.antes as { qtd_presilhas: number }).qtd_presilhas }, { qtd_presilhas: d.qtd_presilhas })
-    } else if (a.acao === 'atualizar_motor_componente' && d.antes) {
-      await updateRow('precos_motor_componentes', { item: d.item },
-        { custo: (d.antes as { custo: number }).custo }, { custo: d.custo })
-    } else if (a.acao === 'atualizar_motor_estrutura' && d.antes) {
-      await updateRow('precos_motor_estrutura', { id: d.id },
-        { valor: (d.antes as { valor: number }).valor }, { valor: d.valor })
-    } else if (a.acao === 'atualizar_romana' && d.antes) {
-      await updateRow('precos_romana_matriz', { largura: d.largura, altura: d.altura },
-        { custo: (d.antes as { custo: number }).custo }, { custo: d.custo })
-    } else {
-      throw new Error('Essa alteração não tem dados suficientes para desfazer')
+      if (checks.some(c => c.estado === 'conflito')) throw new ConflitoErro()
+      const fazer = checks.filter(c => c.estado === 'reverter')
+      for (const { alvo } of fazer) await updateRow(alvo.tabela, alvo.match, alvo.antes, alvo.depois)
+      return fazer.length > 0 ? 'revertido' : 'ja'
     }
+
+    if (plano.tipo === 'apagar') {
+      const estado = classificarApagar(plano.depois, await linhasAtuais(plano.tabela, plano.match, Object.keys(plano.depois)))
+      if (estado === 'conflito') throw new ConflitoErro()
+      if (estado === 'ja_revertido') return 'ja'
+      await deleteRow(plano.tabela, plano.match)
+      return 'revertido'
+    }
+
+    // inserir: só se ainda não existe uma linha igual (senão duplica a promoção)
+    if (Object.keys(plano.procura).length === 0) throw new Error('Essa alteração não tem dados suficientes para desfazer')
+    const existentes = await linhasAtuais(plano.tabela, plano.procura, [Object.keys(plano.procura)[0]])
+    if (classificarInserir(existentes) === 'ja_revertido') return 'ja'
+    await insertRow(plano.tabela, plano.linha)
+    return 'revertido'
   }
 
   async function desfazer(a: Auditoria) {
     setDesfazendo(a.id)
     try {
-      await reverter(a)
+      const r = await reverter(a)
       queryClient.invalidateQueries({ queryKey: ['precos'] })
-      toast('success', 'Alteração desfeita!')
+      toast('success', r === 'ja' ? 'Já estava no valor anterior — nada a desfazer.' : 'Alteração desfeita!')
     } catch (err) {
-      const semDados = err instanceof Error && err.message.startsWith('Essa alteração')
-      toast('error', semDados ? err.message : 'Não consegui desfazer — confira a tabela')
+      if (err instanceof ConflitoErro) {
+        toast('error', MSG_CONFLITO, { duration: 9000 })
+      } else {
+        const semDados = err instanceof Error && err.message.startsWith('Essa alteração')
+        toast('error', semDados ? (err as Error).message : 'Não consegui desfazer — confira a tabela')
+      }
     } finally {
       setDesfazendo(null)
     }
   }
 
+  /** Grava a marca "lote desfeito" na auditoria (é ela que impede o Desfazer de reaparecer). */
+  async function gravarMarca(loteId: string, completo: boolean, revertidas: number[]): Promise<boolean> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      const { error } = await supabase.from('precos_auditoria').insert({
+        usuario: user?.email ?? 'admin', origem: 'grade', acao: ACAO_DESFAZER_LOTE,
+        detalhe: { lote_id: loteId, completo, revertidas },
+      })
+      queryClient.invalidateQueries({ queryKey: ['precos', 'auditoria'] })
+      return !error
+    } catch { return false }
+  }
+
   /**
    * "Desfazer tudo" de um lote: reverte uma a uma, da última aplicada para a primeira
-   * (se a mesma chave mudou duas vezes, volta ao valor original). Falha numa não
-   * interrompe as outras; no fim diz exatamente o que ficou.
+   * (se a mesma chave mudou duas vezes, volta ao valor original). Idempotente:
+   * só tenta o que ainda não foi revertido, pula (e lista) o que foi alterado depois,
+   * e grava uma marca no histórico — o lote não é mais oferecido depois de concluído.
    */
   async function desfazerLote(loteId: string) {
+    if (loteEmAndamento.current) return
+    loteEmAndamento.current = true
     setDesfazendoLote(true)
     try {
       const { data, error } = await supabase.from('precos_auditoria').select('*')
         .filter('detalhe->>lote_id', 'eq', loteId).order('id', { ascending: false })
       if (error) throw error
-      const linhas = (data ?? []) as Auditoria[]
+      const { linhas, marcas } = separarLote((data ?? []) as Auditoria[])
       if (linhas.length === 0) { toast('error', 'Não achei as alterações desse lote no histórico.'); return }
+      if (lotesDesfeitos(marcas).has(loteId)) {
+        setMensagens(m => m.map(x => x.loteId === loteId ? { ...x, desfeito: true } : x))
+        queryClient.invalidateQueries({ queryKey: ['precos', 'auditoria'] })
+        toast('success', 'Esse lote já tinha sido desfeito.')
+        return
+      }
 
+      const pendentes = pendentesDoLote(linhas, marcas, loteId)
+      const revertidas: number[] = []
       const falhas: string[] = []
+      const conflitos: string[] = []
       let feitas = 0
-      for (const linha of linhas) {
-        try { await reverter(linha); feitas++ } catch (err) {
+      for (const linha of pendentes) {
+        const nome = descreverAcao({ tipo: linha.acao, ...linha.detalhe })
+        try {
+          const r = await reverter(linha)
+          revertidas.push(linha.id)
+          if (r === 'revertido') feitas++
+        } catch (err) {
+          if (err instanceof ConflitoErro) { conflitos.push(nome); continue }
           const porque = err instanceof Error && err.message.startsWith('Essa alteração') ? ' (sem dados do valor anterior)' : ''
-          falhas.push(`${descreverAcao({ tipo: linha.acao, ...linha.detalhe })}${porque}`)
+          falhas.push(`${nome}${porque}`)
         }
       }
       queryClient.invalidateQueries({ queryKey: ['precos'] })
-      setMensagens(m => m.map(x => x.loteId === loteId ? { ...x, desfeito: falhas.length === 0 } : x))
-      if (falhas.length === 0) {
-        toast('success', `Lote desfeito: ${feitas} alteraç${feitas > 1 ? 'ões' : 'ão'} revertida${feitas > 1 ? 's' : ''}.`)
-        setMensagens(m => [...m, { papel: 'ia', texto: `Desfeito! ${feitas} alteraç${feitas > 1 ? 'ões voltaram' : 'ão voltou'} ao valor anterior.` }])
+
+      // Concluído = nada ficou por falha (conflito é de propósito: não pisamos em edição posterior)
+      const completo = falhas.length === 0
+      let marcou = true
+      if (completo || revertidas.length > 0) marcou = await gravarMarca(loteId, completo, revertidas)
+      if (completo && !marcou) setDesfeitosLocal(l => [...l, loteId]) // só nesta sessão: recarregar a página traz o botão de volta
+      setMensagens(m => m.map(x => x.loteId === loteId ? { ...x, desfeito: completo } : x))
+
+      const partes: string[] = []
+      if (completo) {
+        partes.push(`Desfeito! ${feitas} alteraç${feitas === 1 ? 'ão voltou' : 'ões voltaram'} ao valor anterior.`)
       } else {
-        toast('error', `Desfiz ${feitas} de ${linhas.length}. ${falhas.length} não voltaram — veja a conversa.`, { duration: 9000 })
-        setMensagens(m => [...m, {
-          papel: 'ia',
-          texto: `Desfiz ${feitas} de ${linhas.length}. Estas NÃO voltaram e continuam como estão:\n${falhas.map(f => `- ${f}`).join('\n')}\nConfira nas tabelas ou use o Desfazer individual no histórico.`,
-        }])
+        partes.push(`Desfiz ${feitas} de ${pendentes.length}. Estas NÃO voltaram e continuam como estão (pode tentar "Desfazer tudo" de novo — só repito o que falta):\n${falhas.map(f => `- ${f}`).join('\n')}`)
       }
+      if (conflitos.length > 0) {
+        partes.push(`${MSG_CONFLITO_LISTA}\n${conflitos.map(f => `- ${f}`).join('\n')}`)
+      }
+      if (!marcou) partes.push('Atenção: não consegui gravar a marca de "desfeito" no histórico. Não clique em "Desfazer tudo" de novo para este pedido.')
+      setMensagens(m => [...m, { papel: 'ia', texto: partes.join('\n\n') }])
+      if (completo && conflitos.length === 0) toast('success', `Lote desfeito: ${feitas} alteraç${feitas === 1 ? 'ão revertida' : 'ões revertidas'}.`)
+      else toast('error', `Desfiz ${feitas}. ${falhas.length + conflitos.length} não voltaram — veja a conversa.`, { duration: 9000 })
     } catch {
       toast('error', 'Não consegui desfazer o lote — nada foi alterado ou confira o histórico.', { duration: 9000 })
     } finally {
+      loteEmAndamento.current = false
       setDesfazendoLote(false)
     }
   }
@@ -324,7 +377,8 @@ export default function PrecosIA({ toast }: Props) {
       return data as Auditoria[]
     },
   })
-  const lote = ultimoLote(auditoria ?? [])
+  const lote = ultimoLote(auditoria ?? [], desfeitosLocal)
+  const desfeitos = new Set([...lotesDesfeitos(auditoria ?? []), ...desfeitosLocal])
 
   useEffect(() => { fimRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [mensagens, pensando])
 
@@ -504,9 +558,9 @@ export default function PrecosIA({ toast }: Props) {
                       ) : (
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                           <p className={cn('text-xs font-bold', m.aplicado ? 'text-emerald-600' : 'text-muted-foreground')}>
-                            {m.aplicado ? (m.desfeito ? '✓ Aplicado e depois desfeito' : '✓ Aplicado') : 'Descartado'}
+                            {m.aplicado ? (m.desfeito || (m.loteId && desfeitos.has(m.loteId)) ? '✓ Aplicado e depois desfeito' : '✓ Aplicado') : 'Descartado'}
                           </p>
-                          {m.aplicado && m.loteId && !m.desfeito && (
+                          {m.aplicado && m.loteId && !m.desfeito && !desfeitos.has(m.loteId) && (
                             <Button variant="outline" size="sm" onClick={() => desfazerLote(m.loteId!)}
                               disabled={desfazendoLote || desfazendo != null} loading={desfazendoLote}>
                               {!desfazendoLote && <Undo2 className="h-3 w-3" />} Desfazer tudo

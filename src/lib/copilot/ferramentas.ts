@@ -15,6 +15,7 @@
 
 import { chavePedido, dataVenda, ehTeste, ehVenda, receita, type VendaMinima } from '../analises/venda.ts'
 import { MOTIVOS_PERDA, faixaEspera } from '../desfecho.ts'
+import { ferramentaPermitida, semMargem, type PermissoesCopilot } from './permissoes.ts'
 
 export type VendaCopilot = VendaMinima & {
   modelo?: string | null
@@ -376,7 +377,8 @@ export function orcamentosEmAberto(orcs: VendaCopilot[], f: FiltroAbertos = {}, 
     cliente: c.itens[0].cliente?.trim() || 'sem nome',
     modelo: [...new Set(c.itens.map((o) => (o.modelo ?? '').trim()).filter(Boolean))].join(', ') || 'sem modelo',
     valor: arred(c.valor),
-    dias_parado: Math.max(...c.itens.map((o) => diasDesde(o.created_at, hoje) ?? 0)),
+    // como o card do Acompanhar: a espera conta do item MAIS RECENTE do pedido (menor nº de dias)
+    dias_parado: Math.min(...c.itens.map((o) => diasDesde(o.created_at, hoje) ?? 0)),
     responsavel: c.itens[0].responsavel?.trim() || 'sem responsável',
   }))
   const faixas = new Map<string, { faixa: string; orcamentos: number; valor: number }>()
@@ -487,7 +489,21 @@ export function calcular(expressao: string): { resultado: number } | { erro: str
 export type Dados = { orcamentos: VendaCopilot[]; leads: LeadCopilot[] }
 
 /** Roda a ferramenta pedida pela IA. Argumento inválido vira erro legível, nunca exceção. */
-export function rodarFerramenta(nome: string, args: Record<string, unknown>, dados: Dados, hoje = hojeCasa()): unknown {
+export function rodarFerramenta(
+  nome: string, args: Record<string, unknown>, dados: Dados, hoje = hojeCasa(), permissoes?: PermissoesCopilot,
+): unknown {
+  // Sem `permissoes` = tudo liberado (testes e uso interno); a Edge Function SEMPRE passa as do usuário.
+  if (permissoes) {
+    if (!ferramentaPermitida(nome, permissoes)) {
+      return { erro: 'sem permissão para essa consulta: o seu acesso ao dash não inclui esses dados' }
+    }
+    const r = executar(nome, args, dados, hoje)
+    return permissoes.margem ? r : semMargem(r)
+  }
+  return executar(nome, args, dados, hoje)
+}
+
+function executar(nome: string, args: Record<string, unknown>, dados: Dados, hoje: string): unknown {
   const periodo = (k = 'periodo') => periodoValido(args[k] as Partial<Periodo>)
   const semPeriodo = { erro: 'informe o período como {inicio, fim} em AAAA-MM-DD' }
   switch (nome) {

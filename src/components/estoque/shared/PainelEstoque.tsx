@@ -16,7 +16,7 @@ import SectionHeader from '@/components/shared/SectionHeader'
 
 const badgeCor = {
   neutro: 'border-border bg-muted/40 text-muted-foreground',
-  info: 'border-primary/25 bg-primary/[0.06] text-primary',
+  info: 'border-primary/25 bg-muted/40 text-primary',
   aviso: 'border-amber-500/30 bg-amber-500/[0.06] text-amber-700 dark:text-amber-400',
   urgente: 'border-red-500/30 bg-red-500/[0.06] text-red-700 dark:text-red-400',
   ok: 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-400',
@@ -74,7 +74,7 @@ export function KpiResumo({
 }) {
   const vazio = valor === '—'
   return (
-    <div className={cn(kpi.cartao, kpi.acento[vazio ? 'neutro' : acento], 'text-center')}>
+    <div className={cn(kpi.cartao, acento === 'primario' && !vazio ? 'border-primary/25 bg-card' : kpi.acento[vazio ? 'neutro' : acento], 'text-center')}>
       <span className={cn(kpi.chip, kpi.chipCor[vazio ? 'neutro' : acento])}>
         <Icon className="h-4 w-4" aria-hidden="true" />
       </span>

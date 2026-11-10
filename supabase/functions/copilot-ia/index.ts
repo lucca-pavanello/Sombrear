@@ -8,7 +8,9 @@
  * que usam as mesmas regras de venda das telas, e só responde com o que elas devolvem.
  *
  * Segurança (padrão da classificar-conversas):
- *  - só usuário logado e aprovado em `profiles`;
+ *  - só usuário logado e aprovado em `profiles`, e só com acesso a algum módulo de dados;
+ *  - vendas/orçamentos só para quem tem pode_orcamento/pode_fechamento (ou admin); leads só com
+ *    pode_agente_ia (ou admin); margem só admin — as ferramentas são filtradas e re-checadas ao rodar;
  *  - as tabelas são lidas com o token de quem pergunta, então vale o RLS dele;
  *  - telefone é lido só para casar venda com lead e nunca vai para a IA;
  *  - orçamentos em aberto e desfechos vêm junto das vendas; as contas de venda seguem
@@ -20,7 +22,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { preflight, resposta } from '../_shared/resposta.ts'
-import { FERRAMENTAS, instrucoes } from '../../../src/lib/copilot/prompt.ts'
+import { ferramentasDeclaradas, instrucoes } from '../../../src/lib/copilot/prompt.ts'
+import { permissoesDoPerfil, semAcessoAosDados } from '../../../src/lib/copilot/permissoes.ts'
 import {
   hojeCasa, rodarFerramenta, type Dados, type LeadCopilot, type VendaCopilot,
 } from '../../../src/lib/copilot/ferramentas.ts'
@@ -86,8 +89,17 @@ Deno.serve(async (req) => {
     if (!user) return resposta(401, { ok: false, erro: 'sessão' })
 
     const admin = createClient(url, serviceRole, { auth: { autoRefreshToken: false, persistSession: false } })
-    const { data: perfil } = await admin.from('profiles').select('approved').eq('id', user.id).single()
+    const { data: perfil } = await admin.from('profiles')
+      .select('approved, is_admin, pode_orcamento, pode_fechamento, pode_agente_ia').eq('id', user.id).single()
     if (perfil?.approved !== true) return resposta(403, { ok: false, erro: 'acesso pendente de aprovação' })
+    // mesma regra do Dashboard (ADMIN_EMAIL de src/lib/constants.ts, repetido aqui como na precos-ia)
+    const perm = permissoesDoPerfil({ ...perfil, email: user.email }, 'luccapavanallo@gmail.com')
+    if (semAcessoAosDados(perm)) {
+      return resposta(403, {
+        ok: false, erro: 'sem-acesso',
+        resposta: 'Seu acesso ao dash não inclui vendas, orçamentos nem leads, então não tenho dados para responder por aqui. Peça a liberação ao administrador.',
+      })
+    }
 
     const apiKey = Deno.env.get('GEMINI_API_KEY')
     if (!apiKey) return resposta(500, { ok: false, erro: 'GEMINI_API_KEY não configurada' })
@@ -102,15 +114,18 @@ Deno.serve(async (req) => {
       .map((m: { role: 'user' | 'model'; text: string }) => ({ role: m.role, parts: [{ text: m.text.slice(0, MAX_PERGUNTA) }] }))
 
     // ── Dados, com o RLS de quem pergunta ────────────────────────────────
+    // Só lê a tabela que as permissões liberam (e a coluna `margem` só para admin)
     const [orcamentos, leads] = await Promise.all([
-      lerTudo<VendaCopilot>((de, ate) => {
+      !perm.vendas ? Promise.resolve([] as VendaCopilot[])
+      : lerTudo<VendaCopilot>((de, ate) => {
         let q = doUsuario.from('orcamentos')
-          .select('id, cliente, valor_cobrado, valor_venda, instalacao, fechado, data_pedido, created_at, pedido_id, modelo, responsavel, origem, telefone, margem, ' +
-            'desfecho, desfecho_em, desfecho_motivo')
+          .select('id, cliente, valor_cobrado, valor_venda, instalacao, fechado, data_pedido, created_at, pedido_id, modelo, responsavel, origem, telefone, ' +
+            (perm.margem ? 'margem, ' : '') + 'desfecho, desfecho_em, desfecho_motivo')
         if (responsavel) q = q.eq('responsavel', responsavel)
         return q.order('id').range(de, ate)
       }),
-      lerTudo<LeadCopilot>((de, ate) => doUsuario.from('crm_sombrear_ia')
+      !perm.leads ? Promise.resolve([] as LeadCopilot[])
+      : lerTudo<LeadCopilot>((de, ate) => doUsuario.from('crm_sombrear_ia')
         .select('id, created_at, nome, whatsapp, identificador_usuario, status_lead, origem, ultimo_valor_cotado, ' +
           'timestamp_ultima_msg, lead_temperatura, lead_score, modelo_interesse, ambiente, cidade, resumo_conversa, ' +
           'objecoes, chatwoot_labels, precisa_humano')
@@ -123,7 +138,7 @@ Deno.serve(async (req) => {
     const agora = new Date()
     const hoje = hojeCasa(agora)
     const diaSemana = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long' }).format(agora)
-    const sistema = instrucoes(hoje, diaSemana) +
+    const sistema = instrucoes(hoje, diaSemana, perm) +
       (responsavel ? `\n\nAs vendas estão filtradas pelo responsável ${responsavel}; diga isso quando falar de venda.` : '')
     const conversa: Conteudo[] = [...historico, { role: 'user', parts: [{ text: pergunta }] }]
 
@@ -132,7 +147,7 @@ Deno.serve(async (req) => {
       const r = await chamarGemini(apiKey, {
         systemInstruction: { parts: [{ text: sistema }] },
         contents: conversa,
-        tools: [{ functionDeclarations: FERRAMENTAS }],
+        tools: [{ functionDeclarations: ferramentasDeclaradas(perm) }],
         // na última rodada a IA tem de responder com o que já tem
         toolConfig: { functionCallingConfig: { mode: ultima ? 'NONE' : 'AUTO' } },
         generationConfig: { temperature: 0.2 },
@@ -152,7 +167,7 @@ Deno.serve(async (req) => {
         parts: chamadas.map((p) => ({
           functionResponse: {
             name: p.functionCall!.name,
-            response: { resultado: rodarFerramenta(p.functionCall!.name, p.functionCall!.args ?? {}, dados, hoje) },
+            response: { resultado: rodarFerramenta(p.functionCall!.name, p.functionCall!.args ?? {}, dados, hoje, perm) },
           },
         })),
       })

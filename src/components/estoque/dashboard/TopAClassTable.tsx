@@ -58,16 +58,16 @@ export default function TopAClassTable({ items, isLoading }: Props) {
   return (
     <div className="rounded-xl border-2 bg-card shadow-sm overflow-hidden">
       <div className="border-b px-4 py-3 text-center">
-        <p className="text-sm font-semibold">Top Produtos — Classe A</p>
+        <p className="text-sm font-semibold">Top Materiais — Classe A</p>
         <p className="text-xs text-muted-foreground">
-          Produtos que concentram ~80% do valor vendido nos últimos 90 dias
+          Materiais que concentram ~80% do valor vendido nos últimos 90 dias
         </p>
       </div>
 
       {!isLoading && classAItems.length === 0 ? (
         <div className="flex items-center justify-center h-28 text-center px-4">
           <p className="text-sm text-muted-foreground">
-            Nenhum produto classificado como Classe A ainda.
+            Nenhum material classificado como Classe A ainda.
           </p>
         </div>
       ) : (

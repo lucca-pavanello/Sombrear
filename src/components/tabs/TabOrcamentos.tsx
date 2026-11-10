@@ -24,23 +24,27 @@ interface Props {
   data: Orcamento[]
   loading: boolean
   resetKey?: number
+  /** false quando embutido em outra tela: não lê nem escreve a URL (evita apagar a query de outras abas). */
+  sincronizarUrl?: boolean
 }
 
-export default function TabOrcamentos({ data, loading, resetKey }: Props) {
+export default function TabOrcamentos({ data, loading, resetKey, sincronizarUrl = true }: Props) {
   const [searchParams, setSearchParams] = useSearchParams()
   const saved = loadFilters()
+  const doUrl = (k: string) => (sincronizarUrl ? searchParams.get(k) : null)
   const [search, setSearch] = useState('')
-  const [responsavel, setResponsavel] = useState(searchParams.get('responsavel') ?? saved.responsavel ?? 'todos')
-  const [modelo, setModelo] = useState(searchParams.get('modelo') ?? saved.modelo ?? 'todos')
-  const [fechadoFilter, setFechadoFilter] = useState(searchParams.get('fechado') ?? saved.fechado ?? 'todos')
-  const [periodo, setPeriodo] = useState(searchParams.get('periodo') ?? saved.periodo ?? 'todos')
-  const [dateFrom, setDateFrom] = useState(searchParams.get('dateFrom') ?? saved.dateFrom ?? '')
-  const [dateTo, setDateTo] = useState(searchParams.get('dateTo') ?? saved.dateTo ?? '')
+  const [responsavel, setResponsavel] = useState(doUrl('responsavel') ?? saved.responsavel ?? 'todos')
+  const [modelo, setModelo] = useState(doUrl('modelo') ?? saved.modelo ?? 'todos')
+  const [fechadoFilter, setFechadoFilter] = useState(doUrl('fechado') ?? saved.fechado ?? 'todos')
+  const [periodo, setPeriodo] = useState(doUrl('periodo') ?? saved.periodo ?? 'todos')
+  const [dateFrom, setDateFrom] = useState(doUrl('dateFrom') ?? saved.dateFrom ?? '')
+  const [dateTo, setDateTo] = useState(doUrl('dateTo') ?? saved.dateTo ?? '')
 
   const debouncedSearch = useDebounce(search, 220)
 
   // Sync filters to URL query string
   useEffect(() => {
+    if (!sincronizarUrl) return
     const params: Record<string, string> = {}
     if (responsavel !== 'todos') params.responsavel = responsavel
     if (modelo !== 'todos') params.modelo = modelo
@@ -49,7 +53,7 @@ export default function TabOrcamentos({ data, loading, resetKey }: Props) {
     if (dateFrom) params.dateFrom = dateFrom
     if (dateTo) params.dateTo = dateTo
     setSearchParams(params, { replace: true })
-  }, [responsavel, modelo, fechadoFilter, periodo, dateFrom, dateTo, setSearchParams])
+  }, [responsavel, modelo, fechadoFilter, periodo, dateFrom, dateTo, setSearchParams, sincronizarUrl])
 
   function clearFilters() {
     setSearch('')

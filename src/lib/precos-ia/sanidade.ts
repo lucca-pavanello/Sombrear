@@ -43,9 +43,67 @@ function leituraProvavel(novo: number, atual: number | null, faixa: Faixa | null
   return null
 }
 
+/**
+ * ÚNICO normalizador de número vindo do modelo/cliente: aceita número, "2.8",
+ * "2,8", "1.234,56" e "R$ 36,00". Devolve null se não for um número finito.
+ * Nunca use `Number()` direto em valor vindo da IA ou do front.
+ */
+export function numeroDoValor(bruto: unknown): number | null {
+  if (typeof bruto === 'number') return Number.isFinite(bruto) ? bruto : null
+  if (typeof bruto !== 'string') return null
+  let s = bruto.replace(/\s/g, '').replace(/^R\$/i, '')
+  if (!s) return null
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.')
+  if (!/^-?\d+(\.\d+)?$/.test(s)) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+type Obrigatoriedade = 'obrig' | 'opc' | 'nulavel'
+
+/** Campos numéricos de cada tipo de ação (o resto é texto e não passa por aqui). */
+export const CAMPOS_NUMERICOS: Record<string, Record<string, Obrigatoriedade>> = {
+  criar_promocao: { desconto_pct: 'obrig' },
+  remover_promocao: { id: 'obrig' },
+  atualizar_preco_tecido: { preco: 'obrig', largura: 'nulavel' },
+  atualizar_parametro: { valor: 'obrig' },
+  atualizar_preco_artigo: { preco: 'obrig' },
+  atualizar_componente_ferragem: { id: 'opc', espessura: 'opc', valor: 'obrig' },
+  atualizar_ph50: { valor: 'obrig' },
+  atualizar_bando_param: { valor: 'obrig' },
+  atualizar_colocacao: { id: 'obrig', preco: 'obrig' },
+  atualizar_barra_faixa: { largura_min: 'obrig', qtd_presilhas: 'obrig' },
+  atualizar_motor_componente: { custo: 'obrig' },
+  atualizar_motor_estrutura: { id: 'obrig', valor: 'obrig' },
+  atualizar_romana: { largura: 'obrig', altura: 'obrig', custo: 'obrig' },
+}
+
+/**
+ * Converte uma vez só os campos numéricos da ação ("2,8" → 2.8). Depois disso
+ * os campos são `number` (ou null/ausente quando opcionais) — nada de `Number()`
+ * em valor cru. Devolve `erro` se algum campo obrigatório não for um número finito.
+ */
+export function normalizarAcao(acao: Record<string, unknown>): { acao: Record<string, unknown>; erro?: string } {
+  const campos = CAMPOS_NUMERICOS[String(acao.tipo)] ?? {}
+  const saida = { ...acao }
+  for (const [campo, regra] of Object.entries(campos)) {
+    const bruto = saida[campo]
+    if (bruto == null || bruto === '') {
+      if (regra === 'obrig') return { acao: saida, erro: `Faltou o número em "${campo}" (${String(acao.tipo)})` }
+      if (regra === 'nulavel') saida[campo] = null
+      else delete saida[campo]
+      continue
+    }
+    const n = numeroDoValor(bruto)
+    if (n == null) return { acao: saida, erro: `Número inválido em "${campo}" (${String(acao.tipo)}): ${String(bruto).slice(0, 40)}` }
+    saida[campo] = n
+  }
+  return { acao: saida }
+}
+
 export function avaliarParametro(chave: string, atual: number | null | undefined, novoBruto: unknown): VereditoParametro {
-  const novo = typeof novoBruto === 'string' ? Number(novoBruto.replace(',', '.')) : Number(novoBruto)
-  if (novoBruto == null || novoBruto === '' || !Number.isFinite(novo)) {
+  const novo = numeroDoValor(novoBruto)
+  if (novo == null) {
     return { suspeita: false, invalido: `Valor inválido para ${chave}` }
   }
   if (novo < 0) return { suspeita: false, invalido: `Valor negativo não faz sentido em ${chave}` }

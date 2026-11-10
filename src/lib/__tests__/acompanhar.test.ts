@@ -42,6 +42,13 @@ describe('agrupar', () => {
     expect(cards[0].total).toBe(40)
   })
 
+  it('itensNoPedido conta também os itens já respondidos', () => {
+    const rows = [o({ pedido_id: 'P', fechado: true }), o({ pedido_id: 'P', desfecho: 'sumiu' }), o({ pedido_id: 'P' })]
+    const [card] = agrupar(rows, 'fila', AGORA)
+    expect(card.itens).toHaveLength(1)
+    expect(card.itensNoPedido).toBe(3)
+  })
+
   it('vista respondidos pega só quem tem desfecho', () => {
     const rows = [o(), o({ desfecho: 'perdido', desfecho_motivo: 'Achou caro', desfecho_em: diasAtras(0) })]
     const cards = agrupar(rows, 'respondidos', AGORA)
@@ -153,10 +160,21 @@ describe('escritasFechou', () => {
     expect(e.every(x => x.patch.origem === 'google')).toBe(true)
   })
 
-  it('valor igual ao calculado não grava valor_cobrado', () => {
+  it('valor igual ao calculado grava valor_cobrado null (limpa valor antigo)', () => {
     const e = escritasFechou(itens, { origem: '', parcelas: 1, cobrado: 1000 }, null, new Date(AGORA))
-    expect(e.every(x => !('valor_cobrado' in x.patch))).toBe(true)
+    expect(e.every(x => 'valor_cobrado' in x.patch && x.patch.valor_cobrado === null)).toBe(true)
     expect(e[0].patch.forma_pagamento_real).toBe('à vista')
+  })
+
+  it('sem forma de pagamento grava forma_pagamento_real null', () => {
+    const e = escritasFechou(itens, { origem: '', parcelas: 0, cobrado: null }, null, new Date(AGORA))
+    expect(e.every(x => x.patch.forma_pagamento_real === null && x.patch.valor_cobrado === null)).toBe(true)
+  })
+
+  it('o desfazer devolve o valor_cobrado e a forma antigos', () => {
+    const antigo = o({ valor_cobrado: 777, forma_pagamento_real: '2x de R$ 388,50' })
+    const [e] = escritasFechou([antigo], { origem: '', parcelas: 0, cobrado: null }, null, new Date(AGORA))
+    expect(valoresAnteriores(antigo, e.patch)).toMatchObject({ valor_cobrado: 777, forma_pagamento_real: '2x de R$ 388,50' })
   })
 
   it('origem vazia mantém a que o item já tinha', () => {

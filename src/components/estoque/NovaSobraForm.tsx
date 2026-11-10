@@ -28,8 +28,9 @@ function SelectOuOutro({ valor, onChange, sugestoes, placeholder, textoOutro, er
   textoOutro: string
   erro?: string
 }) {
+  // O modo é decidido uma vez (valor já fora da lista); depois só muda por "Outro…" / "Lista".
+  const [modoTexto, setModoTexto] = useState(() => valor !== '' && !sugestoes.includes(valor))
   const [livre, setLivre] = useState(false)
-  const modoTexto = livre || (valor !== '' && !sugestoes.includes(valor))
   return (
     <>
       {modoTexto ? (
@@ -43,7 +44,7 @@ function SelectOuOutro({ valor, onChange, sugestoes, placeholder, textoOutro, er
           />
           <button
             type="button"
-            onClick={() => { setLivre(false); onChange('') }}
+            onClick={() => { setLivre(false); setModoTexto(false); onChange('') }}
             className="shrink-0 rounded-lg border px-3 text-xs font-medium text-muted-foreground hover:bg-muted"
             title="Voltar para a lista"
           >
@@ -53,7 +54,7 @@ function SelectOuOutro({ valor, onChange, sugestoes, placeholder, textoOutro, er
       ) : (
         <CustomSelect
           value={valor}
-          onChange={v => { if (v === OUTRO) { setLivre(true); onChange('') } else onChange(v) }}
+          onChange={v => { if (v === OUTRO) { setLivre(true); setModoTexto(true); onChange('') } else onChange(v) }}
           options={[...sugestoes.map(x => ({ value: x, label: x })), { value: OUTRO, label: 'Outro… (digitar)' }]}
           placeholder={placeholder}
         />
@@ -74,6 +75,7 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
   const [form, setForm] = useState(EMPTY)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [salvando, setSalvando] = useState(false)
+  const [sessao, setSessao] = useState(0) // remonta os campos quando o formulário é preenchido
   const painelRef = useRef<HTMLDivElement>(null)
 
   const { data: todasSobras = [] } = useEstoqueSobras({ incluirVendidas: true })
@@ -84,6 +86,7 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
   useEffect(() => {
     if (!open) return
     setErrors({})
+    setSessao(n => n + 1)
     setForm(editando ? {
       familia: editando.familia,
       abertura: editando.abertura ?? '',
@@ -109,7 +112,9 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
     [...base, ...[...new Set(extra.filter(Boolean) as string[])].filter(x => !base.includes(x)).sort((a, b) => a.localeCompare(b, 'pt-BR'))]
   const familias = uniq(FAMILIAS_SOBRA, todasSobras.map(x => x.familia))
   const cores = uniq(CORES_SOBRA, todasSobras.map(x => x.cor))
-  const ehTelaSolar = form.familia.trim().toLowerCase() === 'tela solar'
+  const semAcento = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase()
+  // Abertura aparece em Tela Solar, ou quando a sobra já tem abertura (nunca apagar sem o usuário limpar)
+  const mostrarAbertura = semAcento(form.familia).startsWith('tela solar') || !!editando?.abertura || form.abertura !== ''
 
   function validar(): boolean {
     const e: Record<string, string> = {}
@@ -133,7 +138,7 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
     setSalvando(true)
     const payload = {
       familia: form.familia.trim(),
-      abertura: ehTelaSolar ? (form.abertura || null) : null,
+      abertura: mostrarAbertura ? (form.abertura || null) : null,
       cor: form.cor.trim(),
       largura_m: paraNumero(form.largura),
       altura_m: paraNumero(form.altura),
@@ -182,6 +187,7 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
           <div>
             <label className={labelClass}>Tecido</label>
             <SelectOuOutro
+              key={`f${sessao}`}
               valor={form.familia}
               onChange={v => setForm(f => ({ ...f, familia: v }))}
               sugestoes={familias}
@@ -191,8 +197,8 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
             />
           </div>
 
-          <div className={cn('grid gap-3', ehTelaSolar ? 'grid-cols-2' : 'grid-cols-1')}>
-            {ehTelaSolar && (
+          <div className={cn('grid gap-3', mostrarAbertura ? 'grid-cols-2' : 'grid-cols-1')}>
+            {mostrarAbertura && (
               <div>
                 <label className={labelClass}>Abertura</label>
                 <CustomSelect
@@ -206,6 +212,7 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
             <div>
               <label className={labelClass}>Cor</label>
               <SelectOuOutro
+                key={`c${sessao}`}
                 valor={form.cor}
                 onChange={v => setForm(f => ({ ...f, cor: v }))}
                 sugestoes={cores}

@@ -22,6 +22,8 @@ export type CardPedido = {
   pedidoId: string | null
   /** na fila: só os itens que ainda esperam; em "respondidos": só os que têm desfecho */
   itens: Orcamento[]
+  /** quantas linhas o pedido tem no total (inclui as já respondidas que não aparecem no card) */
+  itensNoPedido: number
   cliente: string
   telefone: string
   responsavel: string
@@ -47,8 +49,11 @@ const maxIso = (a: string, b: string) => (new Date(a).getTime() >= new Date(b).g
 
 export function agrupar(linhas: Orcamento[], vista: Vista, agora: number = Date.now()): CardPedido[] {
   const grupos = new Map<string, Orcamento[]>()
+  const totais = new Map<string, number>()
   for (const o of linhas) {
     if (ehTeste(o)) continue
+    const kt = chavePedido(o)
+    totais.set(kt, (totais.get(kt) ?? 0) + 1)
     const relevante = vista === 'fila' ? naFila(o) : !!o.desfecho
     if (!relevante) continue
     const k = chavePedido(o)
@@ -66,6 +71,7 @@ export function agrupar(linhas: Orcamento[], vista: Vista, agora: number = Date.
       chave,
       pedidoId: itens[0].pedido_id ?? null,
       itens,
+      itensNoPedido: Math.max(totais.get(chave) ?? itens.length, itens.length),
       cliente: itens.find(o => o.cliente)?.cliente ?? '',
       telefone: itens.find(o => o.telefone)?.telefone ?? '',
       responsavel: itens[0].responsavel ?? '',
@@ -235,7 +241,8 @@ export function escritasSumiu(itens: Orcamento[], email: string | null, agora = 
  * Fechou. O "quanto o cliente pagou" é do pedido inteiro: é rateado entre os itens
  * proporcional ao valor de cada um (mesma `ratear` do Semanário, que grava
  * `valor_cobrado` POR ITEM) e a soma dos itens bate o total ao centavo.
- * Se o valor é igual ao calculado, não grava `valor_cobrado` (não é ajuste).
+ * Se o valor é igual ao calculado, grava `valor_cobrado: null` (não é ajuste, e limpa
+ * qualquer valor de um fechamento anterior). Idem `forma_pagamento_real` sem forma informada.
  */
 export function escritasFechou(
   itens: Orcamento[],
@@ -258,8 +265,9 @@ export function escritasFechou(
       fechado: true,
       status: 'fechado',
       origem: origem || o.origem || null,
-      ...(partes ? { valor_cobrado: partes[i] } : {}),
-      ...(forma ? { forma_pagamento_real: forma } : {}),
+      // sempre escreve: sem ajuste, um valor_cobrado antigo de um fechamento anterior não pode sobreviver
+      valor_cobrado: partes ? partes[i] : null,
+      forma_pagamento_real: forma ?? null,
     },
   }))
 }

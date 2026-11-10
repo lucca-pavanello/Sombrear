@@ -350,7 +350,7 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
                 {errors.prazo_entrega_dias && (
                   <p className="mt-1 text-xs text-destructive">{errors.prazo_entrega_dias}</p>
                 )}
-                <p className="mt-1 text-[11px] text-muted-foreground">Usado quando não há prazo específico por categoria</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">É este prazo que alimenta o cálculo de “quando comprar”</p>
               </div>
             </div>
 
@@ -428,7 +428,7 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
           <section className="space-y-3" aria-labelledby="sec-prazos">
             <SecaoTitulo
               id="sec-prazos" n={2} titulo="Prazos por categoria"
-              dica="Marque o que este fornecedor vende e em quantos dias entrega. O prazo de entrega alimenta o cálculo de “quando comprar”; se não marcar nada, vale o prazo geral."
+              dica="Marque o que este fornecedor vende e em quantos dias entrega. Os prazos por categoria servem de referência e consulta; hoje o cálculo de “quando comprar” usa só o “Prazo geral” do fornecedor."
             />
             {TIPOS.map(tipo => {
               const cat = cats[tipo]

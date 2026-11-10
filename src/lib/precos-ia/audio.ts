@@ -17,13 +17,22 @@ export function mimeBase(mime: string): string {
   return mime.split(';')[0].trim().toLowerCase()
 }
 
+/**
+ * Formatos que o Gemini documenta para áudio: wav, mp3, aiff, aac, ogg, flac.
+ * O gravador do navegador entrega webm/ogg/mp4 (opus/aac) — aceitos aqui sem os
+ * parâmetros de codec. `video/webm|mp4` NÃO entra: só chega áudio de verdade.
+ */
+export const MIMES_AUDIO_ACEITOS = [
+  'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/flac',
+] as const
+
 export function validarAudio(bruto: unknown): ResultadoAudio {
   const a = bruto as Partial<AudioRecebido> | null | undefined
   if (!a || typeof a.data !== 'string' || typeof a.mimeType !== 'string' || !a.data) {
     return { ok: false, status: 400, erro: 'O áudio chegou vazio — grave de novo.' }
   }
   const mimeType = mimeBase(a.mimeType)
-  if (!/^(audio\/|video\/(webm|mp4)$)/.test(mimeType)) {
+  if (!(MIMES_AUDIO_ACEITOS as readonly string[]).includes(mimeType)) {
     return { ok: false, status: 400, erro: 'Formato de áudio não suportado.' }
   }
   if (a.data.length > LIMITE_AUDIO_BASE64) {

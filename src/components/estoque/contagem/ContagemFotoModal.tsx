@@ -42,6 +42,7 @@ export default function ContagemFotoModal({ open, onClose, toast, responsavel, u
   const [lote, setLote] = useState<Ajuste[]>([])
   const [estados, setEstados] = useState<Record<string, { estado: EstadoAjuste; msg?: string }>>({})
   const painelRef = useRef<HTMLDivElement>(null)
+  const sessaoRef = useRef(0) // descarta respostas de leituras de uma sessão anterior
 
   const { data: produtos = [] } = useEstoqueProdutos()
   const registrar = useRegistrarMovimentacao()
@@ -53,9 +54,10 @@ export default function ContagemFotoModal({ open, onClose, toast, responsavel, u
   )
   const resumo = useMemo(() => resumir(linhas, mapa), [linhas, mapa])
 
+  const lendo = leitura.fase === 'lendo'
   const temTrabalho = linhas.length > 0 && !salvando
   function tentarFechar() {
-    if (salvando) return
+    if (salvando || lendo) return
     if (temTrabalho && !window.confirm('Fechar agora? As linhas conferidas ainda não foram salvas e serão perdidas.')) return
     onClose()
   }
@@ -64,6 +66,7 @@ export default function ContagemFotoModal({ open, onClose, toast, responsavel, u
   // zera tudo ao abrir
   useEffect(() => {
     if (!open) return
+    sessaoRef.current += 1
     setPasso('fotos'); setFotos([]); setLinhas([]); setIlegivel([]); setLote([]); setEstados({}); setSalvando(false); limparErro()
     painelRef.current?.focus()
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -77,8 +80,9 @@ export default function ContagemFotoModal({ open, onClose, toast, responsavel, u
 
   async function lerFotos() {
     if (linhas.length > 0 && !window.confirm('Ler de novo substitui as linhas que você já conferiu. Continuar?')) return
+    const sessao = sessaoRef.current
     const r = await ler(fotos)
-    if (!r) return
+    if (!r || sessao !== sessaoRef.current) return
     setLinhas(ordenarPorConfianca(r.linhas.map(linhaDaIA)))
     setIlegivel(r.ilegivel)
     setPasso('conferir')
@@ -133,9 +137,20 @@ export default function ContagemFotoModal({ open, onClose, toast, responsavel, u
       const anterior = p?.quantidade_atual ?? a.anterior
       return { ...a, anterior, delta: Math.round((a.novo - anterior) * 1000) / 1000 }
     })
+    // se o saldo recarregado já é o valor contado, não há o que registrar: marca como feito
+    const jaIguais = frescas.filter((a) => a.delta === 0)
+    const aFazer = frescas.filter((a) => a.delta !== 0)
     setLote(frescas)
-    setEstados(Object.fromEntries(frescas.map((a) => [a.uid, { estado: 'pendente' as EstadoAjuste }])))
-    void aplicar(frescas)
+    setEstados(Object.fromEntries(frescas.map((a) => [a.uid, { estado: (a.delta === 0 ? 'ok' : 'pendente') as EstadoAjuste }])))
+    if (jaIguais.length > 0) {
+      const iguais = new Set(jaIguais.map((a) => a.uid))
+      setLinhas((ls) => ls.filter((l) => !iguais.has(l.uid)))
+    }
+    if (aFazer.length > 0) void aplicar(aFazer)
+    else {
+      toast('success', 'Contagem salva: os saldos já estavam iguais ao contado.')
+      onClose()
+    }
   }
 
   if (!open) return null
@@ -165,7 +180,7 @@ export default function ContagemFotoModal({ open, onClose, toast, responsavel, u
           <button
             type="button"
             onClick={tentarFechar}
-            disabled={salvando}
+            disabled={salvando || lendo}
             aria-label="Fechar"
             className="rounded-lg p-1.5 transition-colors hover:bg-muted disabled:opacity-50"
           >
@@ -215,6 +230,10 @@ export default function ContagemFotoModal({ open, onClose, toast, responsavel, u
                 {iniciou
                   ? <>Salvando: <strong className="tabular-nums">{concluidos}</strong> de <strong className="tabular-nums">{lote.length}</strong> feitos{comErro > 0 && <>, <span className="font-semibold text-destructive">{comErro} com erro</span></>}.</>
                   : <>Você vai ajustar <strong className="tabular-nums">{lote.length}</strong> {lote.length === 1 ? 'material' : 'materiais'}. O saldo de cada um passa a ser o valor contado e fica registrado no histórico como “{motivoContagem()}”. Nada foi salvo até agora.</>}
+              </p>
+
+              <p className="text-xs text-muted-foreground">
+                Este ajuste define o saldo que aparece na lista de Materiais.
               </p>
 
               <div className={tabela.container}>

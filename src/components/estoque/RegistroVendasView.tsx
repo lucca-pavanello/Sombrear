@@ -111,7 +111,7 @@ function LinhaItem({
         <p className={cn('sm:pl-7 flex items-center gap-1.5 text-xs', acimaDoSaldo ? 'font-semibold text-red-600' : 'text-muted-foreground')}>
           {acimaDoSaldo && <AlertTriangle className="h-3.5 w-3.5 shrink-0" />}
           {acimaDoSaldo
-            ? `Atenção: só há ${saldoTexto} em estoque, e a quantidade informada é maior. Você ainda pode registrar.`
+            ? `Só há ${saldoTexto} em estoque — o sistema não deixa vender mais do que isso. Registre a entrada antes.`
             : `Disponível em estoque: ${saldoTexto}`}
         </p>
       )}
@@ -177,6 +177,16 @@ export default function RegistroVendasView({ toast, responsavel, userId, onVerDe
   )
 
   async function onSubmit(data: FormData) {
+    // O banco recusa venda acima do saldo (estoque_consumir_peps) — avisa antes de tentar.
+    const acima = data.itens.filter((it) => {
+      const prod = produtos.find((p) => p.id === it.produto_id)
+      return prod != null && Number(it.quantidade) > (Number(prod.quantidade_atual) || 0)
+    })
+    if (acima.length > 0) {
+      const nomes = acima.map((it) => produtos.find((p) => p.id === it.produto_id)?.nome ?? 'material').join(', ')
+      toast('error', `Quantidade acima do estoque em: ${nomes}. Ajuste a quantidade ou registre a entrada antes.`)
+      return
+    }
     try {
       const vendedorFinal = data.vendedor?.trim() || responsavel
       const vendaId = await registrar.mutateAsync({
@@ -206,7 +216,16 @@ export default function RegistroVendasView({ toast, responsavel, userId, onVerDe
       void vendaId
     } catch (err: any) {
       console.error('[RegistroVendasView]', err)
-      toast('error', `Erro ao registrar venda: ${err?.message ?? 'erro desconhecido'}`)
+      const msg: string = err?.message ?? ''
+      if (msg.includes('Estoque insuficiente')) {
+        const nomes = data.itens
+          .map((it) => produtos.find((p) => p.id === it.produto_id)?.nome)
+          .filter(Boolean)
+          .join(', ')
+        toast('error', `Estoque insuficiente para ${nomes || 'um dos materiais'}`)
+      } else {
+        toast('error', `Erro ao registrar venda: ${msg || 'erro desconhecido'}`)
+      }
     }
   }
 

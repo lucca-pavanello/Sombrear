@@ -33,13 +33,17 @@ const CHIP_FAIXA = {
 } as const
 
 export type DadosFechou = { origem: string; parcelas: number; cobrado: number | null }
+/** O que está digitado no painel "Fechou" (texto cru), guardado pela tela caso a gravação falhe. */
+export type RascunhoFechou = { origem: string; parcelas: string; cobrado: string }
 
 type Props = {
   card: CardPedido
   vista: 'fila' | 'respondidos'
   ocupado: boolean
   erro?: string
-  onFechou: (card: CardPedido, dados: DadosFechou) => void
+  /** se há, o painel "Fechou" abre já preenchido com isto */
+  rascunho?: RascunhoFechou
+  onFechou: (card: CardPedido, dados: DadosFechou, digitado: RascunhoFechou) => void
   onNaoFechou: (card: CardPedido, motivo: string | null) => void
   onSumiu: (card: CardPedido) => void
   onVoltar: (card: CardPedido) => void
@@ -50,14 +54,14 @@ type Props = {
 const dinheiroBR = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function CardPedidoAcompanhar({
-  card, vista, ocupado, erro, onFechou, onNaoFechou, onSumiu, onVoltar, onAbrir, onCopiado,
+  card, vista, ocupado, erro, rascunho, onFechou, onNaoFechou, onSumiu, onVoltar, onAbrir, onCopiado,
 }: Props) {
-  const [modo, setModo] = useState<'fechou' | 'perdido' | null>(null)
+  const [modo, setModo] = useState<'fechou' | 'perdido' | null>(rascunho ? 'fechou' : null)
   const [itensAbertos, setItensAbertos] = useState(false)
 
-  const [origem, setOrigem] = useState(card.origem ?? '')
-  const [parcelas, setParcelas] = useState('')
-  const [cobrado, setCobrado] = useState(dinheiroBR(card.total))
+  const [origem, setOrigem] = useState(rascunho?.origem ?? card.origem ?? '')
+  const [parcelas, setParcelas] = useState(rascunho?.parcelas ?? '')
+  const [cobrado, setCobrado] = useState(rascunho?.cobrado ?? dinheiroBR(card.total))
   const [erroCampo, setErroCampo] = useState<string | null>(null)
 
   const faixa = faixaEspera(card.dias)
@@ -65,6 +69,9 @@ export default function CardPedidoAcompanhar({
   const whats = linkWhatsApp(card)
   const fone = formatarTelefone(card.telefone)
   const varios = card.itens.length > 1
+  // pedido com itens já respondidos (ex.: fechados pela tabela de Orçamentos): o card mostra só os que faltam
+  const respondidosFora = Math.max(0, card.itensNoPedido - card.itens.length)
+  const parcial = respondidosFora > 0
 
   function alternar(m: 'fechou' | 'perdido') {
     setErroCampo(null)
@@ -85,7 +92,7 @@ export default function CardPedidoAcompanhar({
     }
     const n = parseInt(parcelas, 10)
     setErroCampo(null)
-    onFechou(card, { origem, parcelas: Number.isFinite(n) && n > 0 ? n : 0, cobrado: valor })
+    onFechou(card, { origem, parcelas: Number.isFinite(n) && n > 0 ? n : 0, cobrado: valor }, { origem, parcelas, cobrado })
   }
 
   async function copiar() {
@@ -223,7 +230,9 @@ export default function CardPedidoAcompanhar({
             </div>
             <div>
               <label className={rotulo} htmlFor={`pago-${card.chave}`}>
-                Quanto o cliente pagou{varios ? ' (pedido todo)' : ''}?
+                {parcial
+                  ? `Quanto o cliente pagou por ${card.itens.length === 1 ? 'este item' : `estes ${card.itens.length} itens`}?`
+                  : `Quanto o cliente pagou${varios ? ' (pedido todo)' : ''}?`}
               </label>
               <input id={`pago-${card.chave}`} value={cobrado} onChange={(e) => setCobrado(e.target.value)}
                 inputMode="decimal" placeholder={dinheiroBR(card.total)} className={campo} />
@@ -234,6 +243,7 @@ export default function CardPedidoAcompanhar({
             : <p className="mt-2 text-[11px] text-muted-foreground">
                 Já vem com o valor do orçamento. Se o cliente pagou outro valor, é só trocar.
                 {varios ? ' Vale para os itens juntos e é dividido entre eles.' : ''}
+                {parcial && ` Este pedido tem mais ${respondidosFora} item${respondidosFora > 1 ? 'ns' : ''} já respondido${respondidosFora > 1 ? 's' : ''}.`}
               </p>}
           <div className="mt-3 flex flex-wrap justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setModo(null)}>

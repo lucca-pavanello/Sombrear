@@ -69,7 +69,7 @@ interface Props {
 // Aqui medimos o que existe, usando só a lista de materiais ativos e a contagem
 // de vendas dos últimos 90 dias (as mesmas que as outras telas já carregam).
 
-type SubAba = 'produtos' | 'vendas'
+type SubAba = 'produtos' | 'vendas' | 'analises'
 
 interface Saude {
   carregando: boolean
@@ -77,10 +77,11 @@ interface Saude {
   comMinimo: number
   comCusto: number
   comLocal: number
+  comAbc: number
   vendas90: number
 }
 
-type Requisito = 'minimo' | 'custo' | 'local' | 'vendas'
+type Requisito = 'minimo' | 'custo' | 'local' | 'vendas' | 'abc'
 
 interface Pendencia {
   texto: string
@@ -113,6 +114,12 @@ function pendencias(saude: Saude, reqs: Requisito[]): Pendencia[] {
       out.push({
         texto: 'Nenhuma venda registrada nos últimos 90 dias: sem histórico de saída o sistema não sabe o que gira. Registre em Estoque › Vendas (não nos orçamentos).',
         rotulo: 'Registrar venda', destino: 'vendas', bloqueia: true,
+      })
+    }
+    if (r === 'abc' && saude.comAbc === 0) {
+      out.push({
+        texto: 'Ainda não dá para dizer — a curva ABC ainda não foi calculada: sem ela o sistema não sabe quais são os materiais classe A. Clique em “Recalcular ABC” em Análises.',
+        rotulo: 'Ir para Análises', destino: 'analises', bloqueia: true,
       })
     }
     if (r === 'minimo' && falta(saude.comMinimo) > 0) {
@@ -180,6 +187,7 @@ export default function AcoesView({ onDrillDown }: Props) {
     comMinimo: materiais.filter((p) => Number(p.quantidade_minima) > 0).length,
     comCusto: materiais.filter((p) => Number(p.custo_unitario) > 0).length,
     comLocal: materiais.filter((p) => !!p.localizacao_id).length,
+    comAbc: materiais.filter((p) => p.classificacao_abc === 'A' || p.classificacao_abc === 'B' || p.classificacao_abc === 'C').length,
     vendas90: pareto?.totalVendas ?? 0,
   }
 
@@ -209,8 +217,9 @@ function SaudeCadastro({ saude, ir }: { saude: Saude; ir: (d: SubAba) => void })
     { chave: 'minimo', rotulo: 'Estoque mínimo', com: saude.comMinimo, dica: 'Base de "o que comprar" e "quando comprar".' },
     { chave: 'custo', rotulo: 'Custo unitário', com: saude.comCusto, dica: 'Necessário para valores em R$ e capital parado.' },
     { chave: 'local', rotulo: 'Localização', com: saude.comLocal, dica: 'Necessário para sugerir reorganização.' },
+    { chave: 'abc', rotulo: 'Curva ABC', com: saude.comAbc, dica: 'Base de “o que comprar” e “como reorganizar”.', destino: 'analises' as SubAba, acao: 'Recalcular em Análises →' },
   ]
-  const completo = total > 0 && itens.every((i) => i.com === total) && saude.vendas90 > 0
+  const completo = total > 0 && itens.every((i) => i.com === total) && saude.vendas90 > 0 && saude.comAbc > 0
 
   return (
     <CartaoPainel
@@ -249,10 +258,10 @@ function SaudeCadastro({ saude, ir }: { saude: Saude; ir: (d: SubAba) => void })
                 {falta > 0 && (
                   <button
                     type="button"
-                    onClick={() => ir('produtos')}
+                    onClick={() => ir(i.destino ?? 'produtos')}
                     className="mt-auto self-start text-xs font-semibold text-primary hover:underline"
                   >
-                    Completar em Materiais →
+                    {i.acao ?? 'Completar em Materiais →'}
                   </button>
                 )}
               </div>
@@ -342,7 +351,7 @@ function SecaoSugestaoCompra({ saude, ir, onVerTodos }: SecaoProps) {
     },
   ]
 
-  const av = avaliar(saude, ['minimo', 'vendas', 'custo'], ir)
+  const av = avaliar(saude, ['abc', 'minimo', 'vendas', 'custo'], ir)
   const pronto = !isLoading && !saude.carregando
 
   return (
@@ -442,7 +451,7 @@ function SecaoPontoPedido({ saude, ir, onVerTodos }: SecaoProps) {
     },
     {
       key: 'ponto_pedido',
-      header: <InfoTooltip label="Ponto de Pedido" tip="O nível de estoque em que o sistema avisa: 'compra agora!'. Se esperar mais, o produto vai faltar antes do pedido chegar." />,
+      header: <InfoTooltip label="Ponto de Pedido" tip="O nível de estoque em que o sistema avisa: 'compra agora!'. Se esperar mais, o material vai faltar antes do pedido chegar." />,
       align: 'center',
       cell: (r) => <span className="tabular-nums">{fmtNum(r.ponto_pedido)}</span>,
     },
@@ -631,7 +640,7 @@ function SecaoReorganizar({ saude, ir, onVerTodos }: SecaoProps) {
     },
   ]
 
-  const av = avaliar(saude, ['local', 'vendas'], ir)
+  const av = avaliar(saude, ['abc', 'local', 'vendas'], ir)
   const pronto = !isLoading && !saude.carregando
 
   return (
