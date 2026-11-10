@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Search, Plus, Pencil, Truck, Clock, Filter, Tag, Download, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { Search, Plus, Pencil, Truck, Filter, Download, ChevronUp, ChevronDown, ChevronsUpDown, Phone, Mail, MessageCircle } from 'lucide-react'
 import { exportCsv, exportXlsx } from '@/lib/exportUtils'
 import { cn } from '@/lib/utils'
 import { useEstoqueFornecedores, useUpdateFornecedor } from '@/hooks/useEstoqueFornecedores'
@@ -10,7 +10,7 @@ import { tbl } from './shared/tableStyles'
 import { FilterPopover, isFilterActive } from './shared/FilterPopover'
 import { FiltrosAtivosChips } from './shared/FiltrosAtivosChips'
 import type { RangeState } from './shared/FilterPopover'
-import type { EstoqueFornecedor } from '@/lib/supabase'
+import type { EstoqueFornecedor, FornecedorCategoria, FornecedorDescontoCombo } from '@/lib/supabase'
 import type { ToastType } from '@/hooks/useToast'
 
 const FILTER_TYPES: Record<string, 'multi' | 'range' | 'text'> = {
@@ -34,6 +34,106 @@ function loadFornecedorFilters() {
 
 const SORT_KEY_F = 'sombrear-estoque-fornecedores-sort'
 type SortKeyF = 'nome' | 'prazo_entrega_dias'
+
+const COLS = 8
+
+const NOME_TIPO: Record<string, string> = { Tecido: 'Tecido', Ferragem: 'Ferragem', Acessorio: 'Acessório' }
+const nomeTipo = (t: string) => NOME_TIPO[t] ?? t
+
+function dinheiro(n: number) {
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+}
+
+function linkWhatsApp(tel: string): string | null {
+  const d = tel.replace(/\D/g, '')
+  if (d.length < 10 || d.length > 13) return null
+  return `https://wa.me/${d.length <= 11 ? '55' + d : d}`
+}
+
+const traco = <span className="text-muted-foreground/40">—</span>
+
+/** Monta o conteúdo de cada coluna uma vez, para a tabela (desktop) e os cartões (celular). */
+function celulas(f: EstoqueFornecedor, cats: FornecedorCategoria[], descontos: FornecedorDescontoCombo[]) {
+  const catsAtivas = cats.filter(c => c.ativo !== false)
+  const wa = f.telefone ? linkWhatsApp(f.telefone) : null
+
+  const nome = (
+    <>
+      <p className={cn('font-semibold', f.ativo ? 'text-foreground' : 'text-muted-foreground line-through')}>{f.nome}</p>
+      {!f.ativo && <p className="text-[11px] text-muted-foreground">inativo</p>}
+      {f.cnpj && <p className="font-mono text-[11px] text-muted-foreground">{f.cnpj}</p>}
+    </>
+  )
+
+  const contato = (f.contato || f.telefone || f.email) ? (
+    <div className="space-y-0.5 text-xs">
+      {f.contato && <p className="font-medium text-foreground">{f.contato}</p>}
+      {f.telefone && (
+        <p className="flex items-center gap-1.5 text-muted-foreground">
+          <Phone className="h-3 w-3 shrink-0" />
+          <a href={`tel:${f.telefone.replace(/[^\d+]/g, '')}`} className="hover:text-foreground hover:underline">{f.telefone}</a>
+          {wa && (
+            <a href={wa} target="_blank" rel="noopener noreferrer" title="Abrir no WhatsApp" aria-label="Abrir no WhatsApp"
+              className="text-emerald-600 hover:text-emerald-700"><MessageCircle className="h-3.5 w-3.5" /></a>
+          )}
+        </p>
+      )}
+      {f.email && (
+        <p className="flex items-center gap-1.5 text-muted-foreground">
+          <Mail className="h-3 w-3 shrink-0" />
+          <a href={`mailto:${f.email}`} className="truncate hover:text-foreground hover:underline">{f.email}</a>
+        </p>
+      )}
+    </div>
+  ) : traco
+
+  const prazo = catsAtivas.length > 0 ? (
+    <div className="flex flex-wrap gap-1">
+      {catsAtivas.map(c => (
+        <span key={c.id} className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-foreground/80 whitespace-nowrap">
+          {nomeTipo(c.tipo_produto)} <span className="font-semibold tabular-nums">{c.lead_time_dias}d</span>
+        </span>
+      ))}
+    </div>
+  ) : f.prazo_entrega_dias != null ? (
+    <span className="text-xs text-muted-foreground">
+      <span className="font-semibold text-foreground/80 tabular-nums">{f.prazo_entrega_dias}d</span> (geral)
+    </span>
+  ) : traco
+
+  const pgto = catsAtivas.filter(c => c.prazo_pagamento_dias != null)
+  const pagamento = pgto.length === 0 ? traco
+    : new Set(pgto.map(c => c.prazo_pagamento_dias)).size === 1 && pgto.length === catsAtivas.length
+      ? <span className="text-xs font-medium tabular-nums">{pgto[0].prazo_pagamento_dias} dias</span>
+      : (
+        <div className="flex flex-wrap gap-1">
+          {pgto.map(c => (
+            <span key={c.id} className="rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-foreground/80 whitespace-nowrap">
+              {nomeTipo(c.tipo_produto)} <span className="font-semibold tabular-nums">{c.prazo_pagamento_dias}d</span>
+            </span>
+          ))}
+        </div>
+      )
+
+  const descontoCell = descontos.length === 0 ? traco : (
+    <ul className="space-y-1 text-xs">
+      {descontos.slice(0, 2).map(d => (
+        <li key={d.id} className="text-foreground/80">
+          <span className="font-semibold text-amber-700 dark:text-amber-400 tabular-nums">{d.percentual_desconto}%</span>
+          {d.valor_minimo_pedido ? ` acima de ${dinheiro(Number(d.valor_minimo_pedido))}` : ''}
+          {' em '}{d.categorias_combo.map(nomeTipo).join('+')}
+        </li>
+      ))}
+      {descontos.length > 2 && <li className="text-muted-foreground">+ {descontos.length - 2} mais (editar para ver)</li>}
+    </ul>
+  )
+
+  const obs = f.observacoes
+    ? <p className="line-clamp-2 text-xs text-muted-foreground" title={f.observacoes}>{f.observacoes}</p>
+    : traco
+
+  return { nome, contato, prazo, pagamento, desconto: descontoCell, obs }
+}
 
 export default function FornecedoresTable({ toast }: Props) {
   const [search, setSearch] = useState(() => { try { return localStorage.getItem(FILTER_KEY + '-search') ?? '' } catch { return '' } })
@@ -154,6 +254,7 @@ export default function FornecedoresTable({ toast }: Props) {
     } catch { /* noop */ }
   }, [filtros, search])
 
+  const mostrarCards = !isLoading && filtered.length > 0
   const hasFilters = Object.values(filtros).some(v => v && isFilterActive('range', v))
 
   return (
@@ -214,8 +315,50 @@ export default function FornecedoresTable({ toast }: Props) {
 
       {/* Table */}
       <div className={tbl.container}>
+        {/* Celular: um cartão por fornecedor (a tabela larga fica só do md pra cima) */}
+        {mostrarCards && (
+          <div className="md:hidden">
+            <ul className="divide-y divide-border/60">
+              {paginated.map(f => {
+                const c = celulas(f, categoriasMap[f.id] ?? [], descontosMap[f.id] ?? [])
+                const rot = 'mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'
+                return (
+                  <li key={f.id} className="space-y-2.5 p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">{c.nome}</div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button onClick={() => handleEditar(f)} className="flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground">
+                          <Pencil className="h-3.5 w-3.5" /> Editar
+                        </button>
+                        <button onClick={() => handleDesativar(f)} disabled={updateMutation.isPending} title="Remover" aria-label="Remover fornecedor"
+                          className="rounded-md px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-red-50 hover:text-red-600 disabled:opacity-50">✕</button>
+                      </div>
+                    </div>
+                    <div>{c.contato}</div>
+                    <div><p className={rot}>Prazo de entrega</p>{c.prazo}</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><p className={rot}>Pagamento</p>{c.pagamento}</div>
+                      <div><p className={rot}>Desconto</p>{c.desconto}</div>
+                    </div>
+                    {f.observacoes && <div><p className={rot}>Observações</p>{c.obs}</div>}
+                  </li>
+                )
+              })}
+            </ul>
+            <div className="flex items-center justify-between border-t border-border px-4 py-2 text-xs text-muted-foreground">
+              <span>{sorted.length} fornecedor{sorted.length !== 1 ? 'es' : ''}</span>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="rounded px-2 py-1 hover:bg-muted disabled:opacity-40">← Ant</button>
+                  <span>{page} / {totalPages}</span>
+                  <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="rounded px-2 py-1 hover:bg-muted disabled:opacity-40">Próx →</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="overflow-auto max-h-[70vh]">
-          <table className="w-full text-sm" style={{ minWidth: '720px' }}>
+          <table className={cn('w-full text-sm', mostrarCards && 'hidden md:table')} style={{ minWidth: '1000px' }}>
             <thead>
               <tr className={tbl.theadRow}>
                 <th
@@ -225,8 +368,7 @@ export default function FornecedoresTable({ toast }: Props) {
                 >
                   <span className="flex items-center gap-1">Fornecedor / Contato {sortIcon('nome')}</span>
                 </th>
-                <th className={tbl.th}>Telefone</th>
-                <th className={tbl.th}>CNPJ</th>
+                <th className={tbl.th}>Contato</th>
                 <th
                   className={cn(tbl.th, 'cursor-pointer hover:bg-muted/60 select-none group')}
                   onClick={e => toggleFilter('prazo_entrega', e)}
@@ -257,14 +399,16 @@ export default function FornecedoresTable({ toast }: Props) {
                     onClose={() => setOpenFilter(null)}
                   />
                 </th>
-                <th className={tbl.th}>Descontos</th>
+                <th className={tbl.th}>Pagamento</th>
+                <th className={tbl.th}>Desconto</th>
+                <th className={tbl.th}>Observações</th>
                 <th className={cn(tbl.th, 'border-r-0')}>Ações</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-4">
+                  <td colSpan={COLS} className="px-4 py-4">
                     <div className="flex flex-col gap-2">
                       {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-14 rounded-lg skeleton-shimmer" />)}
                     </div>
@@ -272,7 +416,7 @@ export default function FornecedoresTable({ toast }: Props) {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center">
+                  <td colSpan={COLS} className="px-4 py-12 text-center">
                     <Truck className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
                     <p className="text-sm font-medium text-muted-foreground">
                       {search || hasFilters ? 'Nenhum fornecedor com esse filtro. Tente outra combinação.' : 'Nenhum fornecedor cadastrado'}
@@ -289,59 +433,15 @@ export default function FornecedoresTable({ toast }: Props) {
                 </tr>
               ) : (
                 paginated.map(f => {
-                  const catsFornec = categoriasMap[f.id] ?? []
-                  const descontosFornec = descontosMap[f.id] ?? []
-
-                  // Coluna Prazo entrega
-                  let prazoCell: React.ReactNode
-                  if (catsFornec.length > 0) {
-                    const leadTimes = catsFornec.map(c => c.lead_time_dias)
-                    const minLt = Math.min(...leadTimes)
-                    const maxLt = Math.max(...leadTimes)
-                    const tooltip = catsFornec.map(c => `${c.tipo_produto}: ${c.lead_time_dias}d`).join(' | ')
-                    prazoCell = (
-                      <span
-                        title={tooltip}
-                        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground cursor-default"
-                      >
-                        <Clock className="h-3.5 w-3.5 shrink-0" />
-                        {minLt === maxLt ? `${minLt} dias` : `${minLt}–${maxLt} dias`}
-                        <span className="text-xs text-muted-foreground/60">({catsFornec.length} categ.)</span>
-                      </span>
-                    )
-                  } else if (f.prazo_entrega_dias != null) {
-                    prazoCell = (
-                      <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <Clock className="h-3.5 w-3.5 shrink-0" />
-                        {f.prazo_entrega_dias} {f.prazo_entrega_dias === 1 ? 'dia' : 'dias'}
-                      </span>
-                    )
-                  } else {
-                    prazoCell = <span className="text-sm text-muted-foreground/40">—</span>
-                  }
-
+                  const c = celulas(f, categoriasMap[f.id] ?? [], descontosMap[f.id] ?? [])
                   return (
-                    <tr key={f.id} className={tbl.tbodyRow}>
-                      <td className={tbl.td}>
-                        <p className="font-semibold text-foreground">{f.nome}</p>
-                        {f.contato && <p className="text-xs text-muted-foreground">{f.contato}</p>}
-                        {f.email && <p className="text-xs text-muted-foreground/60">{f.email}</p>}
-                      </td>
-                      <td className={cn(tbl.td, 'text-muted-foreground whitespace-nowrap')}>{f.telefone ?? '—'}</td>
-                      <td className={cn(tbl.td, 'font-mono text-xs text-muted-foreground whitespace-nowrap')}>{f.cnpj ?? '—'}</td>
-                      <td className={cn(tbl.td, 'text-center')}>
-                        {prazoCell}
-                      </td>
-                      <td className={cn(tbl.td, 'text-center')}>
-                        {descontosFornec.length > 0 ? (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-full px-2 py-0.5">
-                            <Tag className="h-3 w-3" />
-                            {descontosFornec.length} {descontosFornec.length === 1 ? 'desconto' : 'descontos'}
-                          </span>
-                        ) : (
-                          <span className="text-sm text-muted-foreground/40">—</span>
-                        )}
-                      </td>
+                    <tr key={f.id} className={cn(tbl.tbodyRow, 'align-top')}>
+                      <td className={tbl.td}>{c.nome}</td>
+                      <td className={tbl.td}>{c.contato}</td>
+                      <td className={tbl.td}>{c.prazo}</td>
+                      <td className={tbl.td}>{c.pagamento}</td>
+                      <td className={tbl.td}>{c.desconto}</td>
+                      <td className={cn(tbl.td, 'max-w-[220px]')}>{c.obs}</td>
                       <td className={tbl.actionTd}>
                         <div className={cn(tbl.actionGroup, 'justify-center')}>
                           <button onClick={() => handleEditar(f)} title="Editar"
@@ -363,7 +463,7 @@ export default function FornecedoresTable({ toast }: Props) {
             {filtered.length > 0 && (
               <tfoot>
                 <tr className={tbl.tfootRow}>
-                  <td colSpan={6} className={tbl.tfootCell}>
+                  <td colSpan={COLS} className={tbl.tfootCell}>
                     <div className="flex items-center justify-between gap-4">
                       <span>
                         {sorted.length > PAGE_SIZE

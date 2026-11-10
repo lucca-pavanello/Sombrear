@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import * as RadixTabs from '@radix-ui/react-tabs'
 import { X, Plus, Trash2, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useFecharNoFundo } from '@/hooks/useFecharNoFundo'
@@ -13,7 +12,18 @@ import type { ToastType } from '@/hooks/useToast'
 
 const inputClass = 'w-full rounded-lg border bg-background px-3.5 py-3 text-sm outline-none ring-ring focus:ring-2 focus:border-primary transition-all duration-150'
 const labelClass = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground'
-const tabTriggerClass = 'flex-1 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground border-b-2 border-transparent transition-colors data-[state=active]:border-primary data-[state=active]:text-foreground hover:text-foreground'
+
+function SecaoTitulo({ id, n, titulo, dica }: { id: string; n: number; titulo: string; dica: string }) {
+  return (
+    <div className="border-b border-border/60 pb-2">
+      <h3 id={id} className="flex items-center gap-2 text-sm font-semibold">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full border border-primary text-[11px] font-bold text-primary">{n}</span>
+        {titulo}
+      </h3>
+      <p className="mt-1 text-xs text-muted-foreground">{dica}</p>
+    </div>
+  )
+}
 
 const TIPOS = ['Tecido', 'Ferragem', 'Acessorio'] as const
 type TipoProduto = typeof TIPOS[number]
@@ -284,7 +294,7 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="w-full sm:max-w-xl bg-card rounded-t-2xl sm:rounded-2xl shadow-elevated max-h-[92dvh] flex flex-col outline-none"
+        className="w-full sm:max-w-xl bg-card rounded-t-2xl sm:rounded-2xl shadow-elevated h-[min(92dvh,760px)] flex flex-col outline-none"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-4 shrink-0">
@@ -296,22 +306,15 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
           </button>
         </div>
 
-        {/* Tabs */}
-        <RadixTabs.Root defaultValue="dados" className="flex-1 overflow-hidden flex flex-col min-h-0">
-          <RadixTabs.List className="flex border-b px-5 shrink-0">
-            <RadixTabs.Trigger value="dados" className={tabTriggerClass}>
-              Dados Gerais
-            </RadixTabs.Trigger>
-            <RadixTabs.Trigger value="categorias" className={tabTriggerClass}>
-              Categorias e Prazos
-            </RadixTabs.Trigger>
-            <RadixTabs.Trigger value="descontos" className={tabTriggerClass}>
-              Descontos
-            </RadixTabs.Trigger>
-          </RadixTabs.List>
+        {/* Uma página só, rolável, com 3 seções */}
+        <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4 space-y-8">
 
-          {/* ── Dados Gerais ── */}
-          <RadixTabs.Content value="dados" className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* ── 1. Dados Gerais ── */}
+          <section className="space-y-4" aria-labelledby="sec-dados">
+            <SecaoTitulo
+              id="sec-dados" n={1} titulo="Dados gerais"
+              dica="Quem é o fornecedor e como falar com ele. Só o nome é obrigatório."
+            />
             <div>
               <label className={labelClass}>Nome *</label>
               <input
@@ -419,14 +422,14 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
                 </button>
               </div>
             )}
-          </RadixTabs.Content>
+          </section>
 
-          {/* ── Categorias e Prazos ── */}
-          <RadixTabs.Content value="categorias" className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Prazos específicos por tipo de produto. Quando definidos, sobrescrevem o prazo geral.
-            </p>
-
+          {/* ── 2. Categorias e Prazos ── */}
+          <section className="space-y-3" aria-labelledby="sec-prazos">
+            <SecaoTitulo
+              id="sec-prazos" n={2} titulo="Prazos por categoria"
+              dica="Marque o que este fornecedor vende e em quantos dias entrega. O prazo de entrega alimenta o cálculo de “quando comprar”; se não marcar nada, vale o prazo geral."
+            />
             {TIPOS.map(tipo => {
               const cat = cats[tipo]
               return (
@@ -473,14 +476,14 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
                 </div>
               )
             })}
-          </RadixTabs.Content>
+          </section>
 
-          {/* ── Descontos por Combo ── */}
-          <RadixTabs.Content value="descontos" className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Descontos ao comprar múltiplas categorias juntas no mesmo pedido. Mínimo 2 categorias.
-            </p>
-
+          {/* ── 3. Descontos por Combo ── */}
+          <section className="space-y-3" aria-labelledby="sec-descontos">
+            <SecaoTitulo
+              id="sec-descontos" n={3} titulo="Descontos"
+              dica="Opcional. Use quando o fornecedor dá desconto por comprar categorias juntas no mesmo pedido (mínimo 2). Ajuda a decidir se vale juntar compras."
+            />
             {descontos.map((d, i) => (
               <div key={i} className="rounded-lg border bg-muted/20 p-4 space-y-3">
                 <div className="flex items-center justify-between">
@@ -562,8 +565,8 @@ export default function NovoFornecedorForm({ open, onClose, toast, editando }: P
               <Plus className="h-4 w-4" />
               Adicionar desconto por combo
             </button>
-          </RadixTabs.Content>
-        </RadixTabs.Root>
+          </section>
+        </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t px-5 py-4 shrink-0 gap-3">

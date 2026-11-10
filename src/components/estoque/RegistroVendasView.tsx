@@ -1,14 +1,14 @@
 import { useForm, useFieldArray } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ShoppingCart, Plus, Trash2, Loader2, Eye } from 'lucide-react'
+import { ShoppingCart, Plus, Trash2, Loader2, Eye, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatCurrency } from '@/lib/utils'
 import { useEstoqueProdutos } from '@/hooks/useEstoqueProdutos'
 import { useVendas, useRegistrarVenda, useVendedores } from '@/hooks/useEstoqueVendas'
 import type { VendaComContagem } from '@/hooks/useEstoqueVendas'
 import DatePicker from '@/components/ui/DatePicker'
-import { CustomSelect } from '@/components/ui/CustomSelect'
+import SeletorMaterial, { unidadeLabel, formatSaldo } from './SeletorMaterial'
 import { tbl } from './shared/tableStyles'
 import EstoqueTable, { type EstoqueTableColumn } from './shared/EstoqueTable'
 import { INPUT_CLASSES, LABEL_CLASS } from './shared/inputStyles'
@@ -17,7 +17,7 @@ import type { ToastType } from '@/hooks/useToast'
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const itemSchema = z.object({
-  produto_id:     z.string().min(1, 'Selecione o produto'),
+  produto_id:     z.string().min(1, 'Escolha o material'),
   quantidade:     z.number({ error: 'Valor inválido' }).min(0.001, 'Deve ser > 0'),
   preco_unitario: z.number({ error: 'Valor inválido' }).min(0, 'Deve ser ≥ 0'),
   desconto:       z.number({ error: 'Valor inválido' }).min(0, 'Deve ser ≥ 0').default(0),
@@ -46,6 +46,79 @@ interface Props {
   onVerDetalhe: (id: string) => void
 }
 
+// ─── Linha de item ────────────────────────────────────────────────────────────
+// Separada do formulário para permitir, no futuro, um modo "baixa simples" (sem preço).
+
+function LinhaItem({
+  numero, podeRemover, onRemover, subtotal, unidade, saldoTexto, acimaDoSaldo,
+  material, quantidade, preco, desconto,
+}: {
+  numero: number
+  podeRemover: boolean
+  onRemover: () => void
+  subtotal: number
+  unidade: string
+  saldoTexto: string | null
+  acimaDoSaldo: boolean
+  material: React.ReactNode
+  quantidade: React.ReactNode
+  preco: React.ReactNode
+  desconto: React.ReactNode
+}) {
+  const rot = 'block mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground'
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-border p-3 space-y-3">
+      <div className="flex items-start gap-2">
+        <span className="mt-6 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-primary text-[11px] font-bold text-primary">{numero}</span>
+        <div className="flex-1 min-w-0">
+          <label className={rot}>Material</label>
+          {material}
+        </div>
+        <button
+          type="button"
+          onClick={onRemover}
+          disabled={!podeRemover}
+          className="mt-5 flex items-center gap-1 rounded-lg px-2 py-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Remover este item"
+        >
+          <Trash2 className="h-4 w-4" />
+          <span className="hidden md:inline">Remover</span>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:pl-7">
+        <div>
+          <label className={rot}>Quantidade{unidade ? ` (${unidade})` : ''}</label>
+          {quantidade}
+        </div>
+        <div>
+          <label className={rot}>Preço por {unidade || 'unid.'} (R$)</label>
+          {preco}
+        </div>
+        <div>
+          <label className={rot}>Desconto (R$)</label>
+          {desconto}
+        </div>
+        <div>
+          <label className={rot}>Subtotal</label>
+          <div className={cn(INPUT_CLASSES, '!flex !items-center !justify-center !text-orange-700 !font-semibold !cursor-default')}>
+            {formatCurrency(subtotal)}
+          </div>
+        </div>
+      </div>
+
+      {saldoTexto && (
+        <p className={cn('sm:pl-7 flex items-center gap-1.5 text-xs', acimaDoSaldo ? 'font-semibold text-red-600' : 'text-muted-foreground')}>
+          {acimaDoSaldo && <AlertTriangle className="h-3.5 w-3.5 shrink-0" />}
+          {acimaDoSaldo
+            ? `Atenção: só há ${saldoTexto} em estoque, e a quantidade informada é maior. Você ainda pode registrar.`
+            : `Disponível em estoque: ${saldoTexto}`}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export default function RegistroVendasView({ toast, responsavel, userId, onVerDetalhe }: Props) {
@@ -53,11 +126,6 @@ export default function RegistroVendasView({ toast, responsavel, userId, onVerDe
   const { data: vendas = [], isLoading: loadingVendas } = useVendas()
   const { data: vendedores = [] } = useVendedores()
   const registrar = useRegistrarVenda()
-
-  const produtoOptions = produtos.map((p) => ({
-    value: p.id,
-    label: p.codigo ? `${p.codigo} — ${p.nome}` : p.nome,
-  }))
 
   const {
     register,
@@ -259,8 +327,11 @@ export default function RegistroVendasView({ toast, responsavel, userId, onVerDe
 
           {/* Separador + Itens */}
           <div className="border-t border-gray-200 pt-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold">Itens da venda</p>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <p className="text-sm font-semibold">Itens da venda</p>
+                <p className="text-xs text-muted-foreground">Escolha o material, informe a quantidade e confira o valor. O preço sugerido vem do cadastro e pode ser alterado.</p>
+              </div>
               <button
                 type="button"
                 onClick={() => append({ produto_id: '', quantidade: undefined as unknown as number, preco_unitario: undefined as unknown as number, desconto: 0 })}
@@ -271,74 +342,62 @@ export default function RegistroVendasView({ toast, responsavel, userId, onVerDe
               </button>
             </div>
 
-            {/* Cabeçalho das colunas (sm+) */}
-            <div className="hidden sm:block bg-gray-50 border border-gray-200 rounded-t-md px-3 py-2">
-              <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-2">
-                {['Produto', 'Quantidade', 'Preço unit. (R$)', 'Desconto (R$)', 'Subtotal', ''].map((h) => (
-                  <span key={h} className="text-xs uppercase tracking-wide font-semibold text-gray-600 text-center">{h}</span>
-                ))}
-              </div>
-            </div>
-
-            {/* Linhas dos itens */}
-            <div className="border-x border-b border-gray-200 rounded-b-md p-2 space-y-2">
+            {/* Cada item é um bloco: 1ª linha o material, 2ª linha quantidade e valores */}
+            <div className="space-y-3">
               {fields.map((field, index) => {
-                const sub = calcSubtotal(index)
+                const item = watchedItens?.[index]
+                const prod = produtos.find((p) => p.id === item?.produto_id)
+                const qtd = Number(item?.quantidade) || 0
+                const acimaDoSaldo = prod != null && qtd > (Number(prod.quantidade_atual) || 0)
+                const e = errors.itens?.[index]
                 return (
-                  <div
+                  <LinhaItem
                     key={field.id}
-                    className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] gap-2 items-start"
-                  >
-                    {/* Produto */}
-                    <div>
-                      <label className="sm:hidden block mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Produto</label>
-                      <CustomSelect
-                        value={watchedItens[index]?.produto_id ?? ''}
-                        onChange={(v) => {
-                          setValue(`itens.${index}.produto_id`, v, { shouldValidate: true })
-                          handleProdutoChange(index, v)
-                        }}
-                        options={produtoOptions}
-                        placeholder="Selecione o produto…"
-                        className={cn(INPUT_CLASSES, "!font-normal")}
-                      />
-                      {errors.itens?.[index]?.produto_id && (
-                        <p className="mt-0.5 text-xs text-destructive">{errors.itens[index].produto_id?.message}</p>
-                      )}
-                    </div>
-
-                    {/* Quantidade */}
-                    <div>
-                      <label className="sm:hidden block mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Quantidade</label>
-                      <input
-                        type="number"
-                        min="0.001"
-                        step="0.001"
-                        placeholder="0"
-                        {...register(`itens.${index}.quantidade`, { valueAsNumber: true })}
-                        className={cn(INPUT_CLASSES, errors.itens?.[index]?.quantidade && '!border-red-400')}
-                      />
-                      {errors.itens?.[index]?.quantidade && (
-                        <p className="mt-0.5 text-xs text-destructive">{errors.itens[index].quantidade?.message}</p>
-                      )}
-                    </div>
-
-                    {/* Preço unitário */}
-                    <div>
-                      <label className="sm:hidden block mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Preço unit.</label>
+                    numero={index + 1}
+                    podeRemover={fields.length > 1}
+                    onRemover={() => remove(index)}
+                    subtotal={calcSubtotal(index)}
+                    unidade={unidadeLabel(prod?.unidade)}
+                    saldoTexto={prod ? formatSaldo(prod) : null}
+                    acimaDoSaldo={acimaDoSaldo}
+                    material={
+                      <>
+                        <SeletorMaterial
+                          produtos={produtos}
+                          value={item?.produto_id ?? ''}
+                          onChange={(id) => {
+                            setValue(`itens.${index}.produto_id`, id, { shouldValidate: true })
+                            handleProdutoChange(index, id)
+                          }}
+                          invalido={!!e?.produto_id}
+                        />
+                        {e?.produto_id && <p className="mt-0.5 text-xs text-destructive">{e.produto_id.message}</p>}
+                      </>
+                    }
+                    quantidade={
+                      <>
+                        <input
+                          type="number"
+                          min="0.001"
+                          step="0.001"
+                          placeholder="0"
+                          {...register(`itens.${index}.quantidade`, { valueAsNumber: true })}
+                          className={cn(INPUT_CLASSES, (e?.quantidade || acimaDoSaldo) && '!border-red-400')}
+                        />
+                        {e?.quantidade && <p className="mt-0.5 text-xs text-destructive">{e.quantidade.message}</p>}
+                      </>
+                    }
+                    preco={
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         placeholder="0,00"
                         {...register(`itens.${index}.preco_unitario`, { valueAsNumber: true })}
-                        className={cn(INPUT_CLASSES, errors.itens?.[index]?.preco_unitario && '!border-red-400')}
+                        className={cn(INPUT_CLASSES, e?.preco_unitario && '!border-red-400')}
                       />
-                    </div>
-
-                    {/* Desconto */}
-                    <div>
-                      <label className="sm:hidden block mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Desconto</label>
+                    }
+                    desconto={
                       <input
                         type="number"
                         min="0"
@@ -347,29 +406,8 @@ export default function RegistroVendasView({ toast, responsavel, userId, onVerDe
                         {...register(`itens.${index}.desconto`, { valueAsNumber: true })}
                         className={INPUT_CLASSES}
                       />
-                    </div>
-
-                    {/* Subtotal (readonly) */}
-                    <div>
-                      <label className="sm:hidden block mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Subtotal</label>
-                      <div className={cn(INPUT_CLASSES, "!flex !items-center !justify-center !text-orange-700 !font-semibold !cursor-default")}>
-                        {formatCurrency(sub)}
-                      </div>
-                    </div>
-
-                    {/* Remover */}
-                    <div className="flex items-start pt-2 sm:pt-0 sm:justify-center">
-                      <button
-                        type="button"
-                        onClick={() => remove(index)}
-                        disabled={fields.length === 1}
-                        className="rounded-lg p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        title="Remover item"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
+                    }
+                  />
                 )
               })}
             </div>

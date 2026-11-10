@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { PackagePlus, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CustomSelect } from '@/components/ui/CustomSelect'
+import SeletorMaterial, { unidadeLabel, formatSaldo } from './SeletorMaterial'
 import DatePicker from '@/components/ui/DatePicker'
 import { INPUT_CLASSES, LABEL_CLASS } from './shared/inputStyles'
 import { useEstoqueProdutos } from '@/hooks/useEstoqueProdutos'
@@ -15,7 +16,7 @@ import type { ToastType } from '@/hooks/useToast'
 const labelClass = LABEL_CLASS
 
 const schema = z.object({
-  produto_id:     z.string().min(1, 'Selecione o produto'),
+  produto_id:     z.string().min(1, 'Escolha o material'),
   data_entrada:   z.string().min(1, 'Informe a data'),
   quantidade:     z.number({ error: 'Valor inválido' }).min(0.001, 'Deve ser > 0'),
   custo_unitario: z.number({ error: 'Valor inválido' }).min(0, 'Deve ser ≥ 0'),
@@ -24,6 +25,19 @@ const schema = z.object({
 })
 
 type FormData = z.infer<typeof schema>
+
+function PassoTitulo({ n, titulo, dica, opcional }: { n: number; titulo: string; dica?: string; opcional?: boolean }) {
+  return (
+    <div className="pt-1">
+      <p className="flex items-center gap-2 text-sm font-semibold">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full border border-primary text-[11px] font-bold text-primary">{n}</span>
+        {titulo}
+        {opcional && <span className="text-[11px] font-normal text-muted-foreground">(opcional)</span>}
+      </p>
+      {dica && <p className="mt-0.5 ml-7 text-xs text-muted-foreground">{dica}</p>}
+    </div>
+  )
+}
 
 function hoje() {
   return new Date().toISOString().split('T')[0]
@@ -61,12 +75,8 @@ export default function EntradaRapidaForm({ toast }: Props) {
   const fornecedorId = watch('fornecedor_id')
   const dataEntrada = watch('data_entrada')
 
-  const [tipoUnidade, setTipoUnidade] = useState<'unidade' | 'metro'>('unidade')
-
-  const produtoOptions = produtos.map((p) => ({
-    value: p.id,
-    label: p.codigo ? `${p.codigo} — ${p.nome}` : p.nome,
-  }))
+  const produtoSel = produtos.find((p) => p.id === produtoId)
+  const unidade = unidadeLabel(produtoSel?.unidade)
 
   const fornecedorOptions = [
     { value: '', label: '— Nenhum —' },
@@ -96,10 +106,8 @@ export default function EntradaRapidaForm({ toast }: Props) {
         }],
       })
       const qtdFmt = data.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 3 })
-      const unidadeLabel = tipoUnidade === 'metro' ? 'metros' : 'unidades'
-      toast('success', `Entrada registrada: ${qtdFmt} ${unidadeLabel} de ${produto?.nome ?? 'produto'}`)
+      toast('success', `Entrada registrada: ${qtdFmt} ${unidadeLabel(produto?.unidade)} de ${produto?.nome ?? 'material'}`)
       reset({ produto_id: '', data_entrada: hoje(), quantidade: undefined, custo_unitario: undefined, nota_fiscal: '', fornecedor_id: '' })
-      setTipoUnidade('unidade')
     } catch (err) {
       console.error('[EntradaRapidaForm]', err)
       toast('error', 'Erro ao registrar entrada.')
@@ -110,22 +118,22 @@ export default function EntradaRapidaForm({ toast }: Props) {
     <div className="rounded-xl border border-gray-200 dark:border-border bg-card shadow-sm p-4 md:p-6">
       <div className="flex items-center justify-center gap-2 mb-5">
         <PackagePlus className="h-5 w-5 text-primary" />
-        <h3 className="text-base font-semibold">Registrar Entrada</h3>
+        <h3 className="text-base font-semibold">Registrar entrada de material</h3>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {/* Produto + Data */}
+        {/* Passo 1 — material + data */}
+        <PassoTitulo n={1} titulo="Qual material chegou?" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className={labelClass}>
-              Produto <span className="text-orange-500 ml-0.5">*</span>
+              Material <span className="text-orange-500 ml-0.5">*</span>
             </label>
-            <CustomSelect
+            <SeletorMaterial
+              produtos={produtos}
               value={produtoId ?? ''}
-              onChange={(v) => setValue('produto_id', v, { shouldValidate: true })}
-              options={produtoOptions}
-              placeholder="Selecione o produto…"
-              className={cn(INPUT_CLASSES, "!font-normal")}
+              onChange={(id) => setValue('produto_id', id, { shouldValidate: true })}
+              invalido={!!errors.produto_id}
             />
             {errors.produto_id && <p className="mt-1 text-xs text-red-600">{errors.produto_id.message}</p>}
           </div>
@@ -142,46 +150,35 @@ export default function EntradaRapidaForm({ toast }: Props) {
           </div>
         </div>
 
-        {/* Tipo de unidade */}
-        <div className="flex justify-center">
-          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 gap-0.5">
-            {(['unidade', 'metro'] as const).map((tipo) => (
-              <button
-                key={tipo}
-                type="button"
-                onClick={() => setTipoUnidade(tipo)}
-                className={cn(
-                  'px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-150',
-                  tipoUnidade === tipo
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                )}
-              >
-                {tipo === 'unidade' ? 'Unidade' : 'Metro'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Quantidade + Custo */}
+        {/* Passo 2 — quantidade e custo */}
+        <PassoTitulo
+          n={2}
+          titulo="Quanto chegou e quanto custou?"
+          dica={produtoSel ? `Este material é controlado em ${unidade}. Saldo atual: ${formatSaldo(produtoSel)}.` : 'A unidade (m, un, kg…) vem do material escolhido.'}
+        />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className={labelClass}>
-              {tipoUnidade === 'unidade' ? 'Quantidade' : 'Metragem (m)'} <span className="text-orange-500 ml-0.5">*</span>
+              Quantidade{unidade ? ` (${unidade})` : ''} <span className="text-orange-500 ml-0.5">*</span>
             </label>
-            <input
-              type="number"
-              min="0.001"
-              step="0.001"
-              {...register('quantidade', { valueAsNumber: true })}
-              placeholder={tipoUnidade === 'unidade' ? 'Ex: 50' : 'Ex: 10,5'}
-              className={cn(INPUT_CLASSES, errors.quantidade && '!border-red-400 focus:!border-red-500 focus:!ring-red-200')}
-            />
+            <div className="relative">
+              <input
+                type="number"
+                min="0.001"
+                step="0.001"
+                {...register('quantidade', { valueAsNumber: true })}
+                placeholder="Ex: 50"
+                className={cn(INPUT_CLASSES, unidade && '!pr-12', errors.quantidade && '!border-red-400 focus:!border-red-500 focus:!ring-red-200')}
+              />
+              {unidade && (
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground">{unidade}</span>
+              )}
+            </div>
             {errors.quantidade && <p className="mt-1 text-xs text-red-600">{errors.quantidade.message}</p>}
           </div>
           <div>
             <label className={labelClass}>
-              {tipoUnidade === 'unidade' ? 'Custo unitário (R$)' : 'Custo por metro (R$)'} <span className="text-orange-500 ml-0.5">*</span>
+              {unidade ? `Custo por ${unidade} (R$)` : 'Custo unitário (R$)'} <span className="text-orange-500 ml-0.5">*</span>
             </label>
             <input
               type="number"
@@ -195,7 +192,8 @@ export default function EntradaRapidaForm({ toast }: Props) {
           </div>
         </div>
 
-        {/* Nota fiscal + Fornecedor */}
+        {/* Passo 3 — opcionais */}
+        <PassoTitulo n={3} titulo="Nota e fornecedor" opcional dica="Pode deixar em branco. Se o material já tem fornecedor cadastrado, ele é preenchido sozinho." />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className={labelClass}>Nota fiscal</label>
