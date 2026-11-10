@@ -123,6 +123,13 @@ function Kpi({ rotulo, valor, hint, destaque, contar }: {
   )
 }
 
+
+/** Colunas da tabela principal: 5 Venda + 2 Recebido + 3 Resultado + 1 Ações.
+ *  O checkbox do modo "Agrupar" mora dentro da célula Data, então a contagem é fixa. */
+const N_COLUNAS = 11
+/** Régua fina que separa os três grupos (Venda | Recebido | Resultado) */
+const GRUPO_BORDA = 'border-l border-border/40'
+
 export default function TabFechamento() {
   const { data: todos = [], isLoading, refetch } = useOrcamentos()
   const { data: pedidos = [] } = usePedidos()
@@ -559,63 +566,67 @@ export default function TabFechamento() {
     return (
       <Fragment key={o.id}>
       <tr className={cn(tabela.tr, opts?.sub && 'bg-muted/5', emEdicao && 'bg-primary/[0.04]')}>
-        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground tabular-nums">
-          <span className="flex items-center justify-center gap-2">
+        <td className="whitespace-nowrap px-4 py-3 text-left text-xs text-muted-foreground tabular-nums">
+          <span className="flex items-center gap-2">
             {selecionando && (
               <input type="checkbox" className="h-3.5 w-3.5 accent-primary"
                 checked={selecionados.has(o.id)} onChange={() => toggleSelecionado(o.id)} />
             )}
-            <span>
-              {formatDate(o.data_pedido ? `${o.data_pedido}T12:00:00` : o.created_at)}
-              {o.numero_pedido && <span className="block text-[10px] font-semibold text-foreground/60">Ped. {o.numero_pedido}</span>}
-            </span>
+            <span>{formatDate(o.data_pedido ? `${o.data_pedido}T12:00:00` : o.created_at)}</span>
           </span>
         </td>
-        <td className="px-4 py-3 text-center font-medium text-foreground">
-          <span className="block">{o.cliente ?? '—'}</span>
-          {o.origem && <SeloOrigem origem={o.origem} className="mt-1" />}
+        <td className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold text-foreground/70 tabular-nums">
+          {o.numero_pedido ?? <span className="font-normal text-muted-foreground/40">—</span>}
         </td>
-        <td className="px-4 py-3 text-muted-foreground">
+        <td className="min-w-[10rem] px-4 py-3 text-left font-medium text-foreground">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className={cn(opts?.sub && 'pl-3')}>{o.cliente ?? '—'}</span>
+            {o.origem && <SeloOrigem origem={o.origem} />}
+          </span>
+        </td>
+        <td className={cn('min-w-[11rem] px-4 py-3 text-left text-muted-foreground', opts?.sub && 'pl-7')}>
           <span className="block text-foreground">{o.modelo ?? '—'}</span>
           {o.tecido && <span className="text-xs">{o.tecido}</span>}
         </td>
-        <td className="whitespace-nowrap px-4 py-3 text-center text-xs text-muted-foreground tabular-nums">
+        <td className="whitespace-nowrap px-4 py-3 text-left text-xs text-muted-foreground tabular-nums">
           {o.largura && o.altura ? `${o.largura}×${o.altura}m` : '—'}
           {Number(o.quantidade) > 1 && <span className="ml-1">× {o.quantidade}</span>}
         </td>
-        <td className="px-4 py-3 text-center font-semibold tabular-nums text-foreground">
+        <td className={cn('whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-foreground', GRUPO_BORDA)}>
           <ValorComReal calc={bruto} real={pago(o)} />
-          {(o.forma_pagamento_real || o.forma_pagamento) && (
-            <span className={cn('mt-0.5 block text-[10px] font-medium',
+        </td>
+        <td className="min-w-[6rem] whitespace-nowrap px-4 py-3 text-left">
+          {(o.forma_pagamento_real || o.forma_pagamento) ? (
+            <span className={cn('text-xs font-medium',
               pgtoCurto(o).includes('/') ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}
               title={o.forma_pagamento_real ?? undefined}>
               {pgtoCurto(o)}
             </span>
-          )}
+          ) : <span className="text-muted-foreground/40">—</span>}
         </td>
-        <td className="px-4 py-3 text-center tabular-nums text-amber-600 dark:text-amber-400">
+        <td className={cn('whitespace-nowrap px-4 py-3 text-right tabular-nums text-amber-600 dark:text-amber-400', GRUPO_BORDA)}>
           {parceira > 0 || o.valor_parceiro_pago != null
             ? <ValorComReal calc={parceira} real={pagoParceira(o)} />
             : <span className="text-muted-foreground/40">—</span>}
         </td>
-        <td className="px-4 py-3 text-center tabular-nums">
+        <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+          {formatCurrency(sobra)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
           {(() => {
             const sobraCalc = bruto - custoReal(o)
             const pctReal = pago(o) > 0 ? (sobra / pago(o)) * 100 : 0
             const pctCalc = bruto > 0 ? (sobraCalc / bruto) * 100 : 0
             const mudou = Math.abs(pctReal - pctCalc) >= 0.5
             return (
-              <>
-                <span className="block font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(sobra)}</span>
-                <span className={cn('block text-[11px]', mudou ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
-                  {pctReal.toFixed(0)}%{mudou && <> · seria {pctCalc.toFixed(0)}%</>}
-                </span>
-              </>
+              <span className={cn('block text-xs', mudou ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+                {pctReal.toFixed(0)}%{mudou && <span className="block text-[10px]">seria {pctCalc.toFixed(0)}%</span>}
+              </span>
             )
           })()}
         </td>
-        <td className="px-2 py-3 text-center">
-          <span className="flex items-center justify-center gap-1">
+        <td className="px-2 py-3 text-right">
+          <span className="flex items-center justify-end gap-1">
             <button type="button" onClick={() => abrirAjuste(o)}
               title="Ver o custo item a item e ajustar valores"
               className={cn('rounded-md p-1.5 transition-colors hover:bg-muted hover:text-foreground',
@@ -634,7 +645,7 @@ export default function TabFechamento() {
       </tr>
       {emEdicao && (
         <tr>
-          <td colSpan={8} className="bg-muted/20 px-4 py-4">
+          <td colSpan={N_COLUNAS} className="bg-muted/20 px-4 py-4">
             {/* Painel inline (mora dentro de um <td>): quem centraliza é o mx-auto
                 com largura máxima. Sem isso o card de custo estica de ponta a ponta
                 num monitor largo e o formulário de 320px fica espremido no canto.
@@ -913,17 +924,26 @@ export default function TabFechamento() {
             className="px-6 py-14" />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead>
+                <tr className="border-b border-border/60 bg-muted/40">
+                  <th colSpan={5} scope="colgroup" className={cn(tabela.th, 'py-2 text-left')}>Venda</th>
+                  <th colSpan={2} scope="colgroup" className={cn(tabela.th, 'py-2 text-left', GRUPO_BORDA)}>Recebido</th>
+                  <th colSpan={3} scope="colgroup" className={cn(tabela.th, 'py-2 text-left', GRUPO_BORDA)}>Resultado</th>
+                  <th className="px-2 py-2" />
+                </tr>
                 <tr className={tabela.theadRow}>
-                  <th className={cn(tabela.th, 'text-center')}>Data</th>
-                  <th className={cn(tabela.th, 'text-center')}>Cliente</th>
-                  <th className={cn(tabela.th, 'text-center')}>Produto</th>
-                  <th className={cn(tabela.th, 'text-center')}>Medidas</th>
-                  <th className={cn(tabela.th, 'text-center')}>Cliente pagou</th>
-                  <th className={cn(tabela.th, 'text-center')}>À parceira</th>
-                  <th className={cn(tabela.th, 'text-center')}>Sobra</th>
-                  <th className="px-2 py-3" />
+                  <th className={cn(tabela.th, 'text-left')}>Data</th>
+                  <th className={cn(tabela.th, 'text-left')}>Pedido</th>
+                  <th className={cn(tabela.th, 'text-left')}>Cliente</th>
+                  <th className={cn(tabela.th, 'text-left')}>Produto</th>
+                  <th className={cn(tabela.th, 'text-left')}>Medidas</th>
+                  <th className={cn(tabela.th, 'text-right', GRUPO_BORDA)}>Cliente pagou</th>
+                  <th className={cn(tabela.th, 'text-left')}>Pagamento</th>
+                  <th className={cn(tabela.th, 'text-right', GRUPO_BORDA)}>À parceira</th>
+                  <th className={cn(tabela.th, 'text-right')}>Sobra</th>
+                  <th className={cn(tabela.th, 'text-right')}>%</th>
+                  <th className="px-2 py-3 text-right"><span className="sr-only">Ações</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -937,17 +957,19 @@ export default function TabFechamento() {
                   return (
                     <Fragment key={g.chave}>
                       <tr className={cn(tabela.tr, 'bg-muted/10', emEdicaoPedido && 'bg-primary/[0.04]')}>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground tabular-nums">
+                        <td className="whitespace-nowrap px-4 py-3 text-left text-xs text-muted-foreground tabular-nums">
                           {formatDate(g.pedido?.data_pedido ? `${g.pedido.data_pedido}T12:00:00` : dataDe(primeiro))}
-                          <span className="block text-[10px] font-semibold text-foreground/60">
-                            Ped. {g.pedido?.numero_pedido ?? primeiro.numero_pedido ?? '—'}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold text-foreground/70 tabular-nums">
+                          {g.pedido?.numero_pedido ?? primeiro.numero_pedido ?? '—'}
+                        </td>
+                        <td className="min-w-[10rem] px-4 py-3 text-left font-medium text-foreground">
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span>{primeiro.cliente ?? '—'}</span>
+                            {origemGrupo && <SeloOrigem origem={origemGrupo} />}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center font-medium text-foreground">
-                          <span className="block">{primeiro.cliente ?? '—'}</span>
-                          {origemGrupo && <SeloOrigem origem={origemGrupo} className="mt-1" />}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="min-w-[11rem] px-4 py-3 text-left text-muted-foreground">
                           <button type="button"
                             onClick={() => setAbertos(prev => {
                               const novo = new Set(prev)
@@ -962,28 +984,41 @@ export default function TabFechamento() {
                             {[...new Set(g.itens.map(i => i.modelo).filter(Boolean))].join(', ')}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-center text-xs text-muted-foreground">—</td>
-                        <td className="px-4 py-3 text-center font-semibold tabular-nums text-foreground">
+                        <td className="px-4 py-3 text-left text-xs text-muted-foreground">—</td>
+                        <td className={cn('whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums text-foreground', GRUPO_BORDA)}>
                           {formatCurrency(t.bruto)}
                         </td>
-                        <td className="px-4 py-3 text-center tabular-nums text-amber-600 dark:text-amber-400">
+                        <td className="min-w-[6rem] whitespace-nowrap px-4 py-3 text-left">
+                          {(() => {
+                            const formas = [...new Set(g.itens
+                              .filter(i => i.forma_pagamento_real || i.forma_pagamento)
+                              .map(i => pgtoCurto(i)))]
+                            if (formas.length === 0) return <span className="text-muted-foreground/40">—</span>
+                            if (formas.length === 1) {
+                              return <span className={cn('text-xs font-medium',
+                                formas[0].includes('/') ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>{formas[0]}</span>
+                            }
+                            return <span className="text-xs font-medium text-amber-600 dark:text-amber-400" title={formas.join(' · ')}>Misto</span>
+                          })()}
+                        </td>
+                        <td className={cn('whitespace-nowrap px-4 py-3 text-right tabular-nums text-amber-600 dark:text-amber-400', GRUPO_BORDA)}>
                           {formatCurrency(t.parceira)}
                         </td>
-                        <td className="px-4 py-3 text-center tabular-nums">
+                        <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                          {formatCurrency(t.sobra)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
                           {(() => {
                             const mudouG = Math.abs(t.pctReal - t.pctCalc) >= 0.5
                             return (
-                              <>
-                                <span className="block font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(t.sobra)}</span>
-                                <span className={cn('block text-[11px]', mudouG ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
-                                  {t.pctReal.toFixed(0)}%{mudouG && <> · seria {t.pctCalc.toFixed(0)}%</>}
-                                </span>
-                              </>
+                              <span className={cn('block text-xs', mudouG ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+                                {t.pctReal.toFixed(0)}%{mudouG && <span className="block text-[10px]">seria {t.pctCalc.toFixed(0)}%</span>}
+                              </span>
                             )
                           })()}
                         </td>
-                        <td className="px-2 py-3 text-center">
-                          <span className="flex items-center justify-center gap-1">
+                        <td className="px-2 py-3 text-right">
+                          <span className="flex items-center justify-end gap-1">
                             <button type="button" onClick={() => abrirAjustePedido(g)}
                               title="Ver o custo item a item e ajustar valores"
                               className={cn('rounded-md p-1.5 transition-colors hover:bg-muted hover:text-foreground',
@@ -1002,7 +1037,7 @@ export default function TabFechamento() {
                       </tr>
                       {emEdicaoPedido && (
                         <tr>
-                          <td colSpan={8} className="bg-muted/20 px-4 py-4">
+                          <td colSpan={N_COLUNAS} className="bg-muted/20 px-4 py-4">
                             <div className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
                             {/* Esquerda: como a conta foi feita, item a item — igual à venda solta,
                                 só que empilhado, porque o pedido tem mais de um item. */}
@@ -1126,17 +1161,18 @@ export default function TabFechamento() {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted/40 font-bold">
-                  <td colSpan={4} className="px-4 py-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <td colSpan={5} className="px-4 py-3 text-left text-[11px] uppercase tracking-wider text-muted-foreground">
                     Total do período
                   </td>
-                  <td className="px-4 py-3 text-center tabular-nums text-foreground">{formatCurrency(totais.bruto)}</td>
-                  <td className="px-4 py-3 text-center tabular-nums text-amber-600 dark:text-amber-400">{formatCurrency(totais.parceira)}</td>
-                  <td className="px-4 py-3 text-center tabular-nums">
-                    <span className="block text-emerald-600 dark:text-emerald-400">{formatCurrency(totais.sobra)}</span>
-                    <span className={cn('block text-[11px] font-semibold',
+                  <td className={cn('whitespace-nowrap px-4 py-3 text-right tabular-nums text-foreground', GRUPO_BORDA)}>{formatCurrency(totais.bruto)}</td>
+                  <td className="px-4 py-3" />
+                  <td className={cn('whitespace-nowrap px-4 py-3 text-right tabular-nums text-amber-600 dark:text-amber-400', GRUPO_BORDA)}>{formatCurrency(totais.parceira)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{formatCurrency(totais.sobra)}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
+                    <span className={cn('block text-xs font-semibold',
                       Math.abs(totais.pctReal - totais.pctCalc) >= 0.5 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
                       {totais.pctReal.toFixed(0)}%
-                      {Math.abs(totais.pctReal - totais.pctCalc) >= 0.5 && <> · seria {totais.pctCalc.toFixed(0)}%</>}
+                      {Math.abs(totais.pctReal - totais.pctCalc) >= 0.5 && <span className="block text-[10px] font-medium">seria {totais.pctCalc.toFixed(0)}%</span>}
                     </span>
                   </td>
                   <td className="px-2 py-3" />
