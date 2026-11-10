@@ -34,6 +34,7 @@ import DatePicker from '@/components/ui/DatePicker'
 import { Button } from '@/components/ui/primitives'
 import JanelaDados from '@/components/orcamentos/JanelaDados'
 import AvisoErro from '@/components/shared/AvisoErro'
+import TabOrcamentos from '@/components/tabs/TabOrcamentos'
 import { cn } from '@/lib/utils'
 import { kpi } from '@/components/shared/estilos'
 
@@ -292,6 +293,15 @@ export default function TabAnalises({ data, isLoading, error, resetKey, focoResp
           as conversas e objeções são da loja inteira, porque o atendimento da Amanda não tem vendedor.
         </p>
       )}
+
+      {/* Painel de vendas: o antigo "Lista" de Orçamentos (KPIs, ranking, gráficos e fechados),
+          com os filtros dele. Usa os mesmos orçamentos (já filtrados pelo Modo Foco). */}
+      <section aria-labelledby="painel-vendas" className="space-y-4">
+        <h3 id="painel-vendas" className="text-center font-display text-lg font-semibold tracking-tight">
+          Painel de vendas
+        </h3>
+        <TabOrcamentos data={data} loading={!!isLoading} resetKey={resetKey} />
+      </section>
 
       {carregando ? (
         <EsqueletoAnalises />

@@ -19,6 +19,7 @@ import SkeletonCard from '@/components/shared/SkeletonCard'
 import TopLoadingBar from '@/components/shared/TopLoadingBar'
 import { cn } from '@/lib/utils'
 import { comTransicao } from '@/lib/viewTransition'
+import { contarNovos } from '@/lib/acompanhar'
 import { ADMIN_EMAIL, ESTOQUE_EMAIL } from '@/lib/constants'
 import { useUiSound } from '@/hooks/useUiSound'
 import { usePresence } from '@/hooks/usePresence'
@@ -27,17 +28,14 @@ import AICopilot from '@/components/shared/AICopilot'
 import PresentationMode from '@/components/shared/PresentationMode'
 import { useChatStore } from '@/components/estoque/chat/store'
 import { isAIEstoqueEnabled } from '@/components/estoque/chat/featureFlag'
-import JanelaDados from '@/components/orcamentos/JanelaDados'
 
-const TabOrcamentos   = lazyComRecarga(() => import('@/components/tabs/TabOrcamentos'))
-const TabPlanilha     = lazyComRecarga(() => import('@/components/tabs/TabPlanilha'))
+const TabPlanilha    = lazyComRecarga(() => import('@/components/tabs/TabPlanilha'))
 // a aba Agente IA com as suas duas visões (Visão geral e Ligações)
 const TabAgenteIA     = lazyComRecarga(() => import('@/components/agente/AbaAgente'))
-const TabCotacao      = lazyComRecarga(() => import('@/components/tabs/TabCotacao'))
-const TabCustos       = lazyComRecarga(() => import('@/components/tabs/TabCustos'))
+// Calcular = Preço na hora (Simulador) + Orçamento completo (Cotação), com seletor de modo
+const TabCalcular     = lazyComRecarga(() => import('@/components/tabs/TabCalcular'))
 
 const TabAnalises     = lazyComRecarga(() => import('@/components/tabs/TabAnalises'))
-const TabSimulador    = lazyComRecarga(() => import('@/components/tabs/TabSimulador'))
 const TabFechamento   = lazyComRecarga(() => import('@/components/tabs/TabFechamento'))
 const TabRelatorios   = lazyComRecarga(() => import('@/components/tabs/TabRelatorios'))
 const TabAcompanhar   = lazyComRecarga(() => import('@/components/tabs/TabAcompanhar'))
@@ -46,7 +44,7 @@ const PainelAdmin     = lazyComRecarga(() => import('@/components/admin/PainelAd
 const PermissoesView  = lazyComRecarga(() => import('@/components/admin/PermissoesView'))
 const TabPrecos       = lazyComRecarga(() => import('@/components/admin/TabPrecos'))
 
-const VALID_TABS = ['calcular-orcamento', 'planilha', 'calculo-custo', 'agente-ia', 'orcamentos', 'admin', 'analises', 'estoque', 'relatorios', 'precos', 'simulador', 'fechamento', 'acompanhar']
+const VALID_TABS = ['calcular-orcamento', 'planilha', 'agente-ia', 'admin', 'analises', 'estoque', 'relatorios', 'precos', 'fechamento', 'acompanhar']
 const DEFAULT_TAB = 'calcular-orcamento'
 function AskIATabBtn({ onMouseDown, onClick, active }: {
   onMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void
@@ -81,16 +79,13 @@ const SECTION_LABELS: Record<string, string> = {
   'orcamento': 'Orçamentos',
   'calcular-orcamento': 'Orçamentos',
   'planilha': 'Orçamentos',
-  'calculo-custo': 'Orçamentos',
   'agente-ia': 'Agente IA',
-  'orcamentos': 'Orçamentos',
   'analises': 'Relatórios',
   'relatorios': 'Relatórios',
   'acompanhar': 'Orçamentos',
   'estoque': 'Estoque',
   'admin': 'Admin',
   'precos': 'Tabela de Preços',
-  'simulador': 'Orçamentos',
   'fechamento': 'Semanário',
 }
 
@@ -163,7 +158,7 @@ export default function Dashboard() {
     },
     () => {
       // Pulsa as tabs de dados quando um orçamento é atualizado/deletado via realtime
-      ;['orcamentos', 'planilha'].forEach(id => {
+      ;['planilha'].forEach(id => {
         setTabUpdatePulse(prev => new Set([...prev, id]))
         setTimeout(() => setTabUpdatePulse(prev => { const n = new Set(prev); n.delete(id); return n }), 800)
       })
@@ -192,7 +187,7 @@ export default function Dashboard() {
     : isAdminPath ? 'admin'
     : isOrcamentoPath ? (orcamentoSub ?? DEFAULT_TAB)
     : (rawPath || DEFAULT_TAB)
-  const ORCAMENTO_TABS = ['calcular-orcamento', 'simulador', 'planilha', 'calculo-custo', 'orcamentos', 'acompanhar']
+  const ORCAMENTO_TABS = ['calcular-orcamento', 'planilha', 'acompanhar']
   const RELATORIOS_TABS = ['relatorios', 'analises']
   // Enquanto o perfil carrega, não redireciona — evita flash para admins acessando /admin diretamente
   const activeTab = VALID_TABS.includes(tabFromUrl)
@@ -350,8 +345,8 @@ export default function Dashboard() {
         el?.focus()
         el?.select()
       }
-      // 'n' → abre novo orçamento (apenas nas tabs planilha e orcamentos)
-      if ((e.key === 'n' || e.key === 'N') && (activeTab === 'planilha' || activeTab === 'orcamentos')) {
+      // 'n' → abre novo orçamento (apenas na aba Orçamentos, onde está o botão)
+      if ((e.key === 'n' || e.key === 'N') && activeTab === 'planilha') {
         const btn = document.getElementById('novo-orcamento-btn') as HTMLButtonElement | null
         btn?.click()
       }
@@ -387,19 +382,27 @@ export default function Dashboard() {
       if (activeTab === 'admin' && (profileLoading || !isAdmin)) return prev
       if (activeTab === 'precos' && (profileLoading || !canPrecos)) return prev
       if (activeTab === 'agente-ia' && (profileLoading || !canAgenteIA)) return prev
-      if (activeTab === 'simulador' && (profileLoading || !canOrcamento)) return prev
+      if (activeTab === 'calcular-orcamento' && (profileLoading || !canOrcamento)) return prev
       if (activeTab === 'estoque' && (profileLoading || !canEstoque)) return prev
       return new Set([...prev, activeTab])
     })
   }, [activeTab, isAdmin, canEstoque, canPrecos, canAgenteIA, canOrcamento, profileLoading])
 
   // URLs antigas continuam funcionando: Agente IA e Tabela de Preços viraram áreas próprias,
-  // e o custo dos materiais saiu do Estoque para Orçamentos › Custos (27/10)
+  // e o custo dos materiais saiu do Estoque para a Tabela de Preços › Custo de materiais.
+  // Orçamentos virou Calcular · Orçamentos · Acompanhar (Simulador, Lista e Custos foram absorvidos).
   useEffect(() => {
     if (rawPath === 'orcamentos/agente-ia') navigate('/agente-ia', { replace: true })
     if (rawPath === 'admin/precos') navigate('/precos', { replace: true })
-    if (rawPath === 'estoque/custos') navigate('/orcamentos/calculo-custo', { replace: true })
-  }, [rawPath, navigate])
+    if (rawPath === 'orcamentos/simulador' || rawPath === 'simulador')
+      navigate('/orcamentos/calcular-orcamento?modo=na-hora', { replace: true })
+    // as rotas abaixo dependem de quem é o usuário: espera o perfil
+    if (profileLoading) return
+    if (rawPath === 'orcamentos/orcamentos')
+      navigate(canOrcamento || canFechamento ? '/analises' : '/orcamentos/planilha', { replace: true })
+    if (rawPath === 'orcamentos/calculo-custo' || rawPath === 'calculo-custo' || rawPath === 'estoque/custos')
+      navigate(isAdmin ? '/precos?secao=custos' : '/orcamentos/planilha', { replace: true })
+  }, [rawPath, navigate, profileLoading, isAdmin, canOrcamento, canFechamento])
 
   useEffect(() => {
     // Preload apenas dos chunks que o perfil do usuário pode realmente abrir —
@@ -407,11 +410,10 @@ export default function Dashboard() {
     if (profileLoading) return
     const preload = () => {
       if (canOrcamento) {
-        import('@/components/tabs/TabOrcamentos')
         import('@/components/tabs/TabPlanilha')
+        import('@/components/tabs/TabCalcular')
         import('@/components/tabs/TabCotacao')
         import('@/components/tabs/TabAnalises')
-        import('@/components/tabs/TabCustos')
       }
       if (canAgenteIA) import('@/components/agente/AbaAgente')
       if (isAdmin) import('@/components/admin/PainelAdmin')
@@ -553,16 +555,12 @@ export default function Dashboard() {
      dos últimos 7 dias: com 492 em aberto, um contador do total viraria um
      "9+" permanente — ruído. Assim o número é sempre o que dá pra recuperar. */
   const aguardandoResposta = useMemo(
-    () => orcamentos.filter(o => !o.desfecho && !o.fechado
-      && Date.now() - new Date(o.created_at).getTime() <= 7 * 86_400_000).length,
-    [orcamentos])
+    () => contarNovos(focusedOrcamentos),
+    [focusedOrcamentos])
 
   const ORCAMENTO_SUBTABS = useMemo(() => [
-    { id: 'calcular-orcamento', label: 'Calcular',  icon: Calculator    },
-    { id: 'simulador',          label: 'Simulador', icon: Zap           },
-    { id: 'planilha',           label: 'Planilha',  icon: ClipboardList },
-    { id: 'calculo-custo',      label: 'Custos',    icon: ClipboardList },
-    { id: 'orcamentos',         label: 'Lista',     icon: FileText      },
+    { id: 'calcular-orcamento', label: 'Calcular',   icon: Calculator    },
+    { id: 'planilha',           label: 'Orçamentos', icon: ClipboardList },
     { id: 'acompanhar',         label: 'Acompanhar', icon: ClipboardCheck, badge: aguardandoResposta },
   ], [aguardandoResposta])
 
@@ -1121,14 +1119,14 @@ export default function Dashboard() {
           {mountedTabs.has('calcular-orcamento') && (
             <Suspense fallback={<SkeletonForm />}>
               <div className={activeTab === 'calcular-orcamento' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
-                <TabCotacao />
+                <TabCalcular />
               </div>
             </Suspense>
           )}
           {mountedTabs.has('planilha') && (
             <Suspense fallback={<SkeletonTable />}>
               <div className={activeTab === 'planilha' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
-                <TabPlanilha data={focusedOrcamentos} loading={isLoading} toast={toast} />
+                <TabPlanilha data={focusedOrcamentos} loading={isLoading} error={isError} toast={toast} />
               </div>
             </Suspense>
           )}
@@ -1146,25 +1144,10 @@ export default function Dashboard() {
               </div>
             </Suspense>
           )}
-          {mountedTabs.has('simulador') && (
-            <Suspense fallback={<SkeletonForm />}>
-              <div className={activeTab === 'simulador' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
-                <TabSimulador />
-              </div>
-            </Suspense>
-          )}
-          {mountedTabs.has('orcamentos') && (
-            <Suspense fallback={<SkeletonKPITable />}>
-              <div className={activeTab === 'orcamentos' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
-                <TabOrcamentos data={focusedOrcamentos} loading={isLoading} resetKey={tabVersions['orcamentos']} />
-                <JanelaDados className="mt-4" />
-              </div>
-            </Suspense>
-          )}
           {mountedTabs.has('acompanhar') && (
             <Suspense fallback={<SkeletonKPITable />}>
               <div className={activeTab === 'acompanhar' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
-                <TabAcompanhar />
+                <TabAcompanhar data={focusedOrcamentos} loading={isLoading} error={isError} onRefetch={() => { void refetch() }} toast={toast} focoResponsavel={focusResponsavel} />
               </div>
             </Suspense>
           )}
@@ -1172,13 +1155,6 @@ export default function Dashboard() {
             <Suspense fallback={<SkeletonKPITable />}>
               <div className={activeTab === 'relatorios' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
                 <TabRelatorios />
-              </div>
-            </Suspense>
-          )}
-          {mountedTabs.has('calculo-custo') && (
-            <Suspense fallback={<SkeletonTable />}>
-              <div className={activeTab === 'calculo-custo' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
-                <TabCustos podeVerMateriais={isAdmin} isLoading={isLoading} error={isError} toast={toast} />
               </div>
             </Suspense>
           )}

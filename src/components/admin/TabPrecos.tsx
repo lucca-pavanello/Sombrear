@@ -1,5 +1,8 @@
-import { Fragment, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Fragment, Suspense, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { lazyComRecarga } from '@/lib/lazyComRecarga'
+import { useProfile } from '@/hooks/useProfile'
+import { ADMIN_EMAIL } from '@/lib/constants'
 import { tabela } from '@/components/shared/estilos'
 import {
   Blinds, Calculator, CheckCircle2, ChevronDown, CircleDollarSign, Cog, Download, FileSpreadsheet, FileText, Layers, Loader2, Pencil, Percent, Printer, Ruler, Search, Settings2, Sparkles, Tag, TriangleAlert, Wrench,
@@ -22,7 +25,10 @@ import {
 import { useCustoTecidoCortina } from '@/hooks/useCustoTecidoCortina'
 import { margemDoTecido } from '@/lib/catalogo/margem'
 
-interface Props { toast: (type: 'success' | 'error', message: string) => void }
+interface Props { toast: (type: 'success' | 'error' | 'info', message: string) => void }
+
+// Só baixa o catálogo de custos (e roda as consultas dele) quando a seção abre.
+const CatalogoCustosView = lazyComRecarga(() => import('@/components/estoque/CatalogoCustosView'))
 
 const fmtBRL = (v: unknown) =>
   `R$ ${(Math.round((Number(v ?? 0) + 1e-9) * 100) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -42,13 +48,26 @@ const SECOES = [
   { id: 'motor',      label: 'Motor',          icon: Cog,       fimGrupo: false },
   { id: 'cortinas',   label: 'Cortinas',       icon: Blinds,    fimGrupo: true },
   { id: 'parametros', label: 'Parâmetros',     icon: Settings2, fimGrupo: false },
+  // custo de COMPRA dos materiais: só admin (a Tabela de Preços abre para quem tem pode_precos)
+  { id: 'custos',     label: 'Custo de materiais', icon: CircleDollarSign, fimGrupo: false },
 ] as const
 
 type SecaoId = typeof SECOES[number]['id']
 
 export default function TabPrecos({ toast }: Props) {
   const navigate = useNavigate()
-  const [secao, setSecao] = useState<SecaoId>('ia')
+  const { data: perfil } = useProfile()
+  const isAdmin = perfil?.email === ADMIN_EMAIL || perfil?.is_admin === true
+  const secoesVisiveis = SECOES.filter(s => s.id !== 'custos' || isAdmin)
+  // `?secao=custos` abre direto a seção (links antigos de Estoque › Custos e Orçamentos › Custos)
+  const [searchParams] = useSearchParams()
+  const secaoDaUrl = searchParams.get('secao')
+  const [secaoEscolhida, setSecao] = useState<SecaoId>('ia')
+  useEffect(() => {
+    if (secaoDaUrl && SECOES.some(s => s.id === secaoDaUrl)) setSecao(secaoDaUrl as SecaoId)
+  }, [secaoDaUrl])
+  // não-admin nunca chega em 'custos', nem por URL nem por estado antigo
+  const secao: SecaoId = secaoEscolhida === 'custos' && !isAdmin ? 'ia' : secaoEscolhida
   const [promoPrefill, setPromoPrefill] = useState<string | null>(null)
   const { updateRow, insertRow, deleteRow } = usePrecosMutations()
 
@@ -137,7 +156,7 @@ export default function TabPrecos({ toast }: Props) {
 
       {/* Simulador virou área própria (balcão) — atalho no lugar */}
       <button
-        onClick={() => navigate('/orcamentos/simulador')}
+        onClick={() => navigate('/orcamentos/calcular-orcamento?modo=na-hora')}
         className="flex w-full items-center gap-2.5 rounded-xl border-2 bg-card px-5 py-4 text-left shadow-sm transition-all hover:border-primary/40 hover:shadow-md"
       >
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
@@ -151,7 +170,7 @@ export default function TabPrecos({ toast }: Props) {
       </button>
 
       <div className="flex flex-wrap items-stretch gap-1 rounded-xl bg-muted/50 p-1">
-        {SECOES.map(({ id, label, icon: Icon, fimGrupo }) => (
+        {secoesVisiveis.map(({ id, label, icon: Icon, fimGrupo }) => (
           <Fragment key={id}>
             <button onClick={() => setSecao(id)} title={label}
               className={cn(
@@ -180,6 +199,11 @@ export default function TabPrecos({ toast }: Props) {
       {secao === 'motor' && <SecaoMotor salvar={salvar} />}
       {secao === 'cortinas' && <SecaoCortinas salvar={salvar} excluir={excluir} adicionar={adicionar} />}
       {secao === 'parametros' && <SecaoParametros salvar={salvar} />}
+      {secao === 'custos' && isAdmin && (
+        <Suspense fallback={<div className="h-64 animate-pulse rounded-xl bg-muted/40" />}>
+          <CatalogoCustosView toast={toast} />
+        </Suspense>
+      )}
     </div>
   )
 }

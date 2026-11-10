@@ -7,6 +7,9 @@ import OrcamentosTable from '@/components/orcamentos/OrcamentosTable'
 import NovoOrcamentoForm from '@/components/orcamentos/NovoOrcamentoForm'
 import FiltersBar from '@/components/orcamentos/FiltersBar'
 import SkeletonCard from '@/components/shared/SkeletonCard'
+import TabCalculoCusto from '@/components/tabs/TabCalculoCusto'
+import { segmentado } from '@/components/shared/estilos'
+import { cn } from '@/lib/utils'
 import type { ToastType } from '@/hooks/useToast'
 
 const FILTER_KEY = 'sombrear-planilha-filters'
@@ -21,11 +24,15 @@ function loadFilters() {
 interface Props {
   data: Orcamento[]
   loading: boolean
+  /** falha ao ler os orçamentos — só repassada à visão de custos */
+  error?: boolean
   toast: (type: ToastType, message: string, opts?: { duration?: number; undoAction?: () => void }) => void
 }
 
-export default function TabPlanilha({ data, loading, toast }: Props) {
+export default function TabPlanilha({ data, loading, error, toast }: Props) {
   const saved = loadFilters()
+  // Orçamentos (a tabela) ou Custos lançados (o custo de cada orçamento)
+  const [vista, setVista] = useState<'orcamentos' | 'custos'>('orcamentos')
   const [formOpen, setFormOpen] = useState(false)
   const [tableOpen, setTableOpen] = useState(() => {
     try { return localStorage.getItem('sombrear-table-open-planilha') !== 'false' }
@@ -96,9 +103,30 @@ export default function TabPlanilha({ data, loading, toast }: Props) {
     )
   }
 
+  const seletorVista = (
+    <div className={cn(segmentado.trilho, 'mx-auto w-fit')}>
+      {([['orcamentos', 'Orçamentos'], ['custos', 'Custos lançados']] as const).map(([id, rotulo]) => (
+        <button key={id} onClick={() => setVista(id)} aria-pressed={vista === id}
+          className={cn(segmentado.item, vista === id ? segmentado.ativo : segmentado.inativo)}>
+          {rotulo}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (vista === 'custos') {
+    return (
+      <div className="space-y-4">
+        {seletorVista}
+        <TabCalculoCusto isLoading={loading} error={error} toast={toast} />
+      </div>
+    )
+  }
+
   return (
     <>
       <div className="space-y-4">
+        {seletorVista}
         {/* Título centralizado; os controles ficam na faixa de baixo */}
         <div className="text-center">
           <h2 className="font-display text-base font-semibold">Todos os Orçamentos</h2>

@@ -30,10 +30,16 @@ export const MOTIVOS_PERDA = [
 ] as const
 
 /** Dias inteiros desde que o orçamento foi feito. */
-export function diasDesde(iso: string): number {
-  const ms = Date.now() - new Date(iso).getTime()
+export function diasDesde(iso: string, agora: number = Date.now()): number {
+  const ms = agora - new Date(iso).getTime()
   return Math.max(0, Math.floor(ms / 86_400_000))
 }
+
+/** Os campos que registrar/desfazer um desfecho escreve — o undo restaura exatamente estes. */
+export const CAMPOS_DESFECHO = [
+  'desfecho', 'desfecho_em', 'desfecho_por', 'desfecho_motivo',
+  'fechado', 'status', 'origem', 'valor_cobrado', 'forma_pagamento_real',
+] as const
 
 /**
  * Faixa de idade da espera. As cores seguem o semáforo do dash: verde é

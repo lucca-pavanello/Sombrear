@@ -6,6 +6,8 @@ import AvatarInitials from '@/components/shared/AvatarInitials'
 import EmptyState from '@/components/shared/EmptyState'
 import type { Orcamento } from '@/lib/supabase'
 import { formatCurrency, cn, calcularMargem, formatDate } from '@/lib/utils'
+import { useProfile } from '@/hooks/useProfile'
+import { ADMIN_EMAIL } from '@/lib/constants'
 
 import EditOrcamentoForm from './EditOrcamentoForm'
 import { TEMA_TABELA, alinharSecoes, faixaMarca, rodapeMarca } from '@/lib/pdfMarca'
@@ -67,6 +69,7 @@ function fireConfetti(originX: number, originY: number, bigDeal = false) {
 
 function FechadoCheckbox({ orcamento, toast }: { orcamento: Orcamento; toast: ToastFn }) {
   const { mutate: update, isPending } = useUpdateOrcamento()
+  const { data: profile } = useProfile()
 
   function handleClick(e: React.MouseEvent<HTMLButtonElement>) {
     const wasFechado = !!orcamento.fechado
@@ -77,14 +80,25 @@ function FechadoCheckbox({ orcamento, toast }: { orcamento: Orcamento; toast: To
       fireConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2, bigDeal)
       haptic('success')
     }
-    update({ id: orcamento.id, fechado: novoEstado }, {
+    // Mantém a tela Acompanhar coerente: fechar aqui também registra o desfecho "fechou";
+    // desmarcar limpa o desfecho só se era esse (um "perdido"/"sumiu" não é desta caixa).
+    const anterior = {
+      fechado: orcamento.fechado ?? false,
+      desfecho: orcamento.desfecho ?? null,
+      desfecho_em: orcamento.desfecho_em ?? null,
+      desfecho_por: orcamento.desfecho_por ?? null,
+    }
+    const patch = novoEstado
+      ? { fechado: true, desfecho: 'fechou', desfecho_em: new Date().toISOString(), desfecho_por: profile?.email ?? null }
+      : wasFechado && orcamento.desfecho === 'fechou'
+        ? { fechado: false, desfecho: null, desfecho_em: null, desfecho_por: null }
+        : { fechado: false }
+    update({ id: orcamento.id, ...patch }, {
       onSuccess: () => {
-        if (novoEstado) {
-          toast('success', `${orcamento.cliente ?? orcamento.responsavel} — marcado como fechado`, {
-            duration: 5000,
-            undoAction: () => update({ id: orcamento.id, fechado: false }),
-          })
-        }
+        toast('success', `${orcamento.cliente ?? orcamento.responsavel} — ${novoEstado ? 'marcado como fechado' : 'reaberto'}`, {
+          duration: 5000,
+          undoAction: () => update({ id: orcamento.id, ...anterior }),
+        })
       },
     })
   }
@@ -257,9 +271,10 @@ interface Props {
 const ORC_COLS_KEY  = 'sombrear-orcamentos-cols'
 const ORC_SORT_KEY  = 'sombrear-orcamentos-sort'
 
-type ColId = 'num' | 'data' | 'cliente' | 'responsavel' | 'ambiente' | 'modelo' | 'tecido' | 'qtd' | 'valor' | 'margem' | 'status' | 'fechado'
+type ColId = 'num' | 'data' | 'cliente' | 'responsavel' | 'ambiente' | 'modelo' | 'tecido' | 'qtd' | 'valor' | 'margem' | 'custo' | 'custoAcab' | 'status' | 'fechado'
 
-const COL_DEFS: { id: ColId; label: string; key?: SortKey; optional: boolean; align: 'center' | 'right' }[] = [
+// `somenteAdmin`: custo de compra não é coisa de vendedor — a coluna nem aparece no seletor
+const COL_DEFS: { id: ColId; label: string; key?: SortKey; optional: boolean; align: 'center' | 'right'; somenteAdmin?: boolean }[] = [
   { id: 'num',         label: '#',          optional: false, align: 'center' },
   { id: 'data',        label: 'Data',       key: 'created_at', optional: false, align: 'center' },
   { id: 'cliente',     label: 'Cliente',    key: 'cliente',    optional: false, align: 'center' },
@@ -270,6 +285,8 @@ const COL_DEFS: { id: ColId; label: string; key?: SortKey; optional: boolean; al
   { id: 'qtd',         label: 'Qtd',        optional: true,  align: 'center' },
   { id: 'valor',       label: 'Valor',      key: 'valor_venda', optional: false, align: 'center' },
   { id: 'margem',      label: 'Margem',     key: 'margem',     optional: false, align: 'center' },
+  { id: 'custo',       label: 'Custo total',optional: true,  align: 'center', somenteAdmin: true },
+  { id: 'custoAcab',   label: 'Custo acab.',optional: true,  align: 'center', somenteAdmin: true },
   { id: 'status',      label: 'Status n8n', optional: true,  align: 'center' },
   { id: 'fechado',     label: 'Fechado',    optional: false, align: 'center' },
 ]
@@ -277,7 +294,7 @@ const COL_DEFS: { id: ColId; label: string; key?: SortKey; optional: boolean; al
 const COL_DEFAULTS: Record<ColId, boolean> = {
   num: true, data: true, cliente: true, responsavel: true,
   ambiente: true, modelo: true, tecido: true, qtd: true,
-  valor: true, margem: true, status: false, fechado: true,
+  valor: true, margem: true, custo: false, custoAcab: false, status: false, fechado: true,
 }
 
 function loadColVis(): Record<ColId, boolean> {
@@ -342,8 +359,11 @@ export default function OrcamentosTable({ data, toast, isFiltered, search = '', 
     return () => document.removeEventListener('mousedown', handleClick)
   }, [colsOpen])
 
-  const vis = (id: ColId) => colVis[id] !== false
-  const visibleCols = COL_DEFS.filter(c => vis(c.id))
+  const { data: perfil } = useProfile()
+  const isAdmin = perfil?.email === ADMIN_EMAIL || perfil?.is_admin === true
+  const colsDisponiveis = COL_DEFS.filter(c => !c.somenteAdmin || isAdmin)
+  const vis = (id: ColId) => colVis[id] !== false && (isAdmin || !COL_DEFS.find(c => c.id === id)?.somenteAdmin)
+  const visibleCols = colsDisponiveis.filter(c => vis(c.id))
 
   function copyPhone(e: React.MouseEvent, phone: string) {
     e.stopPropagation()
@@ -469,7 +489,7 @@ export default function OrcamentosTable({ data, toast, isFiltered, search = '', 
               </button>
               {colsOpen && (
                 <div className="absolute right-0 top-full mt-1.5 z-50 w-44 rounded-xl border border-border bg-card shadow-elevated p-2 flex flex-col gap-0.5">
-                  {COL_DEFS.filter(c => c.optional).map(c => (
+                  {colsDisponiveis.filter(c => c.optional).map(c => (
                     <label key={c.id} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium cursor-pointer hover:bg-muted/60 transition-colors select-none">
                       <input
                         type="checkbox"
@@ -663,6 +683,12 @@ export default function OrcamentosTable({ data, toast, isFiltered, search = '', 
                             <span className="text-xs text-muted-foreground/20">—</span>
                           )}
                         </td>
+                        {vis('custo') && <td className={cn('px-4 py-3 text-center tabular-nums', i % 2 === 1 ? 'bg-muted/[0.15]' : '', 'group-hover:bg-primary/[0.04]')}>
+                          {o.custo_tecido ? formatCurrency(o.custo_tecido) : <span className="text-muted-foreground/30">—</span>}
+                        </td>}
+                        {vis('custoAcab') && <td className={cn('px-4 py-3 text-center tabular-nums', i % 2 === 1 ? 'bg-muted/[0.15]' : '', 'group-hover:bg-primary/[0.04]')}>
+                          {o.custo_acabamento ? formatCurrency(o.custo_acabamento) : <span className="text-muted-foreground/30">—</span>}
+                        </td>}
                         {/* status n8n */}
                         {vis('status') && <td className={cn('px-4 py-3', i % 2 === 1 ? 'bg-muted/[0.15]' : '', 'group-hover:bg-primary/[0.04]')}>
                           {o.status === 'ENVIADO' ? (
