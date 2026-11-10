@@ -9,10 +9,13 @@
 #
 # O que roda no ar (mudar aqui, nao no codigo):
 #   LLM          cerebro (modelo.OUTROS); fora da China
-#   VOZ / VOZ_ID voz de quem fala (a clonada entra aqui no fim)
+#   VOZ / VOZ_ID voz de quem fala (a clonada entra aqui no fim); "cartesia/sonic-3" = pelo LiveKit Inference,
+#                no credito da conta LiveKit (a conta propria da Cartesia ficou sem credito em 21/10)
+#   VOZ_RESERVA  outra voz, de outro fornecedor: se a principal falhar, a Amanda segue com ela
 #   URL_ORCAMENTO a funcao orcamento-voz, com o preco do banco
-param([string]$Llm = "deepseek-baseten", [string]$Voz = "cartesia",
-      [string]$VozId = "1cf751f6-8749-43ab-98bd-230dd633abdb", [switch]$SoChaves)
+param([string]$Llm = "deepseek-baseten", [string]$Voz = "cartesia/sonic-3",
+      [string]$VozId = "1cf751f6-8749-43ab-98bd-230dd633abdb", [string]$Reserva = "elevenlabs",
+      [string]$ReservaId = "cgSgspJ2msm6clMCkdW9", [switch]$SoChaves)
 $ErrorActionPreference = "Stop"
 
 $pastaVoz = Split-Path $PSScriptRoot -Parent
@@ -26,7 +29,9 @@ foreach ($n in "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET") { Set-Ite
 # a chave do cerebro escolhido (modelo.OUTROS): DEEPSEEK_API_KEY, BASETEN_API_KEY...
 $chaveLlm = (& uv run --directory $pastaVoz python -c "from modelo import OUTROS; print(OUTROS['$Llm'][1][1])").Trim()
 $precisa = @($chaveLlm, "LIGACAO_SECRET", "REGISTRAR_LIGACAO_URL")
-if ($Voz -eq "cartesia") { $precisa += "CARTESIA_API_KEY" } elseif ($Voz -eq "elevenlabs") { $precisa += "ELEVEN_API_KEY" }
+foreach ($v in $Voz, $Reserva) {
+    if ($v -eq "cartesia") { $precisa += "CARTESIA_API_KEY" } elseif ($v -eq "elevenlabs") { $precisa += "ELEVEN_API_KEY" }
+}
 $faltam = $precisa | Where-Object { -not $lidas[$_] }
 if ($faltam) { throw "Falta em $chaves : $($faltam -join ', ')" }
 
@@ -39,7 +44,7 @@ if (-not $SoChaves) {
 $segredos = [System.IO.Path]::GetTempFileName()
 try {
     $linhas = @(
-        "PUBLICO=cliente", "LLM=$Llm", "VOZ=$Voz", "VOZ_ID=$VozId",
+        "PUBLICO=cliente", "LLM=$Llm", "VOZ=$Voz", "VOZ_ID=$VozId", "VOZ_RESERVA=$Reserva", "VOZ_RESERVA_ID=$ReservaId",
         "URL_ORCAMENTO=https://nlswyjpjzibuvdsaooyg.supabase.co/functions/v1/orcamento-voz"
     )
     foreach ($n in $precisa) { $linhas += "$n=$($lidas[$n])" }
