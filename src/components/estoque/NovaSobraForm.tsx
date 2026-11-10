@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import { CustomSelect } from '@/components/ui/CustomSelect'
 import { cn } from '@/lib/utils'
 import {
-  useAddSobra, useUpdateSobra, FAMILIAS_SOBRA, ABERTURAS_SOBRA, CORES_SOBRA,
+  useAddSobra, useUpdateSobra, useEstoqueSobras, FAMILIAS_SOBRA, ABERTURAS_SOBRA, CORES_SOBRA,
   nomeSobra, type EstoqueSobra,
 } from '@/hooks/useEstoqueSobras'
 
@@ -15,6 +15,52 @@ interface Props {
   onClose: () => void
   toast: (type: 'success' | 'error' | 'info', message: string) => void
   editando?: EstoqueSobra | null
+}
+
+const OUTRO = '__outro__'
+
+/** Lista fechada + "Outro…" que vira campo de texto livre. Valores fora da lista (ex.: ao editar) caem direto no texto. */
+function SelectOuOutro({ valor, onChange, sugestoes, placeholder, textoOutro, erro }: {
+  valor: string
+  onChange: (v: string) => void
+  sugestoes: string[]
+  placeholder: string
+  textoOutro: string
+  erro?: string
+}) {
+  const [livre, setLivre] = useState(false)
+  const modoTexto = livre || (valor !== '' && !sugestoes.includes(valor))
+  return (
+    <>
+      {modoTexto ? (
+        <div className="flex gap-2">
+          <input
+            autoFocus={livre}
+            value={valor}
+            onChange={e => onChange(e.target.value)}
+            placeholder={textoOutro}
+            className={cn(inputClass, erro && 'border-destructive')}
+          />
+          <button
+            type="button"
+            onClick={() => { setLivre(false); onChange('') }}
+            className="shrink-0 rounded-lg border px-3 text-xs font-medium text-muted-foreground hover:bg-muted"
+            title="Voltar para a lista"
+          >
+            Lista
+          </button>
+        </div>
+      ) : (
+        <CustomSelect
+          value={valor}
+          onChange={v => { if (v === OUTRO) { setLivre(true); onChange('') } else onChange(v) }}
+          options={[...sugestoes.map(x => ({ value: x, label: x })), { value: OUTRO, label: 'Outro… (digitar)' }]}
+          placeholder={placeholder}
+        />
+      )}
+      {erro && <p className="mt-1 text-xs text-destructive">{erro}</p>}
+    </>
+  )
 }
 
 const EMPTY = { familia: '', abertura: '', cor: '', largura: '', altura: '', observacao: '' }
@@ -30,6 +76,7 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
   const [salvando, setSalvando] = useState(false)
   const painelRef = useRef<HTMLDivElement>(null)
 
+  const { data: todasSobras = [] } = useEstoqueSobras({ incluirVendidas: true })
   const addMutation = useAddSobra()
   const updateMutation = useUpdateSobra()
   const editing = !!editando
@@ -57,10 +104,17 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
 
   if (!open) return null
 
+  // Sugestões = lista padrão + o que já foi cadastrado antes (tecido/cor novos entram sozinhos)
+  const uniq = (base: readonly string[], extra: (string | null)[]) =>
+    [...base, ...[...new Set(extra.filter(Boolean) as string[])].filter(x => !base.includes(x)).sort((a, b) => a.localeCompare(b, 'pt-BR'))]
+  const familias = uniq(FAMILIAS_SOBRA, todasSobras.map(x => x.familia))
+  const cores = uniq(CORES_SOBRA, todasSobras.map(x => x.cor))
+  const ehTelaSolar = form.familia.trim().toLowerCase() === 'tela solar'
+
   function validar(): boolean {
     const e: Record<string, string> = {}
-    if (!form.familia) e.familia = 'Escolha o tecido'
-    if (!form.cor) e.cor = 'Escolha a cor'
+    if (!form.familia.trim()) e.familia = 'Escolha o tecido'
+    if (!form.cor.trim()) e.cor = 'Escolha a cor'
     const L = paraNumero(form.largura)
     const A = paraNumero(form.altura)
     if (!Number.isFinite(L) || L <= 0) e.largura = 'Largura precisa ser maior que zero'
@@ -78,9 +132,9 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
     if (!validar() || salvando) return
     setSalvando(true)
     const payload = {
-      familia: form.familia,
-      abertura: form.abertura || null,
-      cor: form.cor,
+      familia: form.familia.trim(),
+      abertura: ehTelaSolar ? (form.abertura || null) : null,
+      cor: form.cor.trim(),
       largura_m: paraNumero(form.largura),
       altura_m: paraNumero(form.altura),
       observacao: form.observacao.trim() || null,
@@ -124,37 +178,41 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        <form id="form-nova-sobra" onSubmit={handleSubmit} className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <div>
             <label className={labelClass}>Tecido</label>
-            <CustomSelect
-              value={form.familia}
+            <SelectOuOutro
+              valor={form.familia}
               onChange={v => setForm(f => ({ ...f, familia: v }))}
-              options={FAMILIAS_SOBRA.map(f => ({ value: f, label: f }))}
+              sugestoes={familias}
               placeholder="Escolha o tecido"
+              textoOutro="Nome do tecido"
+              erro={errors.familia}
             />
-            {errors.familia && <p className="mt-1 text-xs text-destructive">{errors.familia}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelClass}>Abertura</label>
-              <CustomSelect
-                value={form.abertura}
-                onChange={v => setForm(f => ({ ...f, abertura: v }))}
-                options={[{ value: '', label: 'Não se aplica' }, ...ABERTURAS_SOBRA.map(a => ({ value: a, label: a }))]}
-                placeholder="Só Tela Solar"
-              />
-            </div>
+          <div className={cn('grid gap-3', ehTelaSolar ? 'grid-cols-2' : 'grid-cols-1')}>
+            {ehTelaSolar && (
+              <div>
+                <label className={labelClass}>Abertura</label>
+                <CustomSelect
+                  value={form.abertura}
+                  onChange={v => setForm(f => ({ ...f, abertura: v }))}
+                  options={[{ value: '', label: 'Não informada' }, ...ABERTURAS_SOBRA.map(a => ({ value: a, label: a }))]}
+                  placeholder="Escolha a abertura"
+                />
+              </div>
+            )}
             <div>
               <label className={labelClass}>Cor</label>
-              <CustomSelect
-                value={form.cor}
+              <SelectOuOutro
+                valor={form.cor}
                 onChange={v => setForm(f => ({ ...f, cor: v }))}
-                options={CORES_SOBRA.map(c => ({ value: c, label: c }))}
+                sugestoes={cores}
                 placeholder="Escolha a cor"
+                textoOutro="Nome da cor"
+                erro={errors.cor}
               />
-              {errors.cor && <p className="mt-1 text-xs text-destructive">{errors.cor}</p>}
             </div>
           </div>
 
@@ -204,7 +262,7 @@ export default function NovaSobraForm({ open, onClose, toast, editando }: Props)
           <button type="button" onClick={onClose} className="flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
             Cancelar
           </button>
-          <button onClick={handleSubmit} disabled={salvando} className="flex-1 rounded-xl bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-brand transition-all hover:opacity-90 active:scale-95 disabled:opacity-60">
+          <button type="submit" form="form-nova-sobra" disabled={salvando} className="flex-1 rounded-xl bg-brand-gradient px-4 py-2.5 text-sm font-semibold text-white shadow-brand transition-all hover:opacity-90 active:scale-95 disabled:opacity-60">
             {salvando ? 'Salvando…' : editing ? 'Salvar' : 'Cadastrar'}
           </button>
         </div>

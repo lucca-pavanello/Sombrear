@@ -1,14 +1,19 @@
 import {
-  ShoppingBag, Clock, AlertTriangle, ArrowLeftRight, CircleCheck,
+  ShoppingBag, Clock, AlertTriangle, ArrowLeftRight, ClipboardCheck, PackageOpen,
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { formatCurrency } from '@/lib/utils'
+import { useEstoqueProdutos } from '@/hooks/useEstoqueProdutos'
+import { useParetoData } from '@/hooks/useEstoqueAnalytics'
 import { useSugestaoCompra } from '@/hooks/useEstoqueSugestao'
 import { useEstoquePontoPedido } from '@/hooks/useEstoquePontoPedido'
 import { useLeadTimeRows } from '@/hooks/useEstoqueLeadTime'
 import { useEstoqueSugestoesMover } from '@/hooks/useEstoqueSugestoesMover'
 import { NIVEIS_ACESSO } from '@/lib/constants'
-import SectionCard from './shared/SectionCard'
+import {
+  CartaoPainel, GrupoPainel, VazioCartao, CarregandoBloco, AvisoDados, TudoCerto, BarraProgresso,
+} from './shared/PainelEstoque'
 import EstoqueTable, { type EstoqueTableColumn } from './shared/EstoqueTable'
 import { ClasseABC } from './shared/ClasseABC'
 import { InfoTooltip } from '@/components/ui/InfoTooltip'
@@ -59,37 +64,230 @@ interface Props {
   onDrillDown: (tab: 'lead-time' | 'mover' | 'sugestao' | 'ponto-pedido') => void
 }
 
+// ─── Saúde do cadastro ────────────────────────────────────────────────────────
+// "Nada a fazer" só é verdade quando os dados que a recomendação usa existem.
+// Aqui medimos o que existe, usando só a lista de materiais ativos e a contagem
+// de vendas dos últimos 90 dias (as mesmas que as outras telas já carregam).
+
+type SubAba = 'produtos' | 'vendas'
+
+interface Saude {
+  carregando: boolean
+  total: number
+  comMinimo: number
+  comCusto: number
+  comLocal: number
+  vendas90: number
+}
+
+type Requisito = 'minimo' | 'custo' | 'local' | 'vendas'
+
+interface Pendencia {
+  texto: string
+  rotulo: string
+  destino: SubAba
+  /** true = a recomendação não tem como ser calculada; false = sai, mas incompleta */
+  bloqueia: boolean
+}
+
+interface SecaoProps {
+  saude: Saude
+  ir: (d: SubAba) => void
+  onVerTodos: () => void
+}
+
+function pendencias(saude: Saude, reqs: Requisito[]): Pendencia[] {
+  if (saude.carregando) return []
+  const { total } = saude
+  if (total === 0) {
+    return [{
+      texto: 'Nenhum material ativo cadastrado: sem materiais não há o que analisar.',
+      rotulo: 'Cadastrar materiais', destino: 'produtos', bloqueia: true,
+    }]
+  }
+  const out: Pendencia[] = []
+  const falta = (com: number) => total - com
+
+  for (const r of reqs) {
+    if (r === 'vendas' && saude.vendas90 === 0) {
+      out.push({
+        texto: 'Nenhuma venda registrada nos últimos 90 dias: sem histórico de saída o sistema não sabe o que gira. Registre em Estoque › Vendas (não nos orçamentos).',
+        rotulo: 'Registrar venda', destino: 'vendas', bloqueia: true,
+      })
+    }
+    if (r === 'minimo' && falta(saude.comMinimo) > 0) {
+      const todos = saude.comMinimo === 0
+      out.push({
+        texto: todos
+          ? `Nenhum dos ${total} materiais tem estoque mínimo definido: sem isso não dá para dizer o que comprar.`
+          : `${falta(saude.comMinimo)} de ${total} materiais estão sem estoque mínimo: esses não entram na conta.`,
+        rotulo: 'Definir mínimos em Materiais', destino: 'produtos', bloqueia: todos,
+      })
+    }
+    if (r === 'custo' && falta(saude.comCusto) > 0) {
+      const todos = saude.comCusto === 0
+      out.push({
+        texto: todos
+          ? `Nenhum dos ${total} materiais tem custo unitário: os valores em R$ não podem ser calculados.`
+          : `${falta(saude.comCusto)} de ${total} materiais estão sem custo: os valores em R$ ficam incompletos.`,
+        rotulo: 'Preencher custos em Materiais', destino: 'produtos', bloqueia: false,
+      })
+    }
+    if (r === 'local' && falta(saude.comLocal) > 0) {
+      const todos = saude.comLocal === 0
+      out.push({
+        texto: todos
+          ? `Nenhum dos ${total} materiais tem localização: não dá para sugerir onde cada um deve ficar.`
+          : `${falta(saude.comLocal)} de ${total} materiais estão sem localização: esses ficam de fora das sugestões.`,
+        rotulo: 'Definir locais em Materiais', destino: 'produtos', bloqueia: todos,
+      })
+    }
+  }
+  return out
+}
+
+/** Avisos parciais (sai resultado, mas incompleto) ou, se bloqueia, o estado "ainda não dá para dizer". */
+function avaliar(saude: Saude, reqs: Requisito[], ir: (d: SubAba) => void) {
+  const lista = pendencias(saude, reqs)
+  const bloqueio = lista.find((p) => p.bloqueia) ?? null
+  const parciais = bloqueio ? [] : lista
+  const avisos = parciais.map((p) => (
+    <AvisoDados key={p.texto} texto={p.texto} acao={{ label: p.rotulo, onClick: () => ir(p.destino) }} />
+  ))
+  const bloqueioEl = bloqueio ? (
+    <VazioCartao
+      icon={PackageOpen}
+      title="Ainda não dá para dizer"
+      description={bloqueio.texto}
+      action={{ label: bloqueio.rotulo, onClick: () => ir(bloqueio.destino) }}
+    />
+  ) : null
+  return { bloqueio, avisos, bloqueioEl, completo: !saude.carregando && lista.length === 0 }
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export default function AcoesView({ onDrillDown }: Props) {
+  const navigate = useNavigate()
+  const ir = (d: SubAba) => navigate(`/estoque/${d}`)
+
+  const { data: materiais = [], isLoading: lm } = useEstoqueProdutos()
+  const { data: pareto, isLoading: lv } = useParetoData()
+
+  const saude: Saude = {
+    carregando: lm || lv,
+    total: materiais.length,
+    comMinimo: materiais.filter((p) => Number(p.quantidade_minima) > 0).length,
+    comCusto: materiais.filter((p) => Number(p.custo_unitario) > 0).length,
+    comLocal: materiais.filter((p) => !!p.localizacao_id).length,
+    vendas90: pareto?.totalVendas ?? 0,
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header da página */}
-      <div className="text-center">
-        <h3 className="font-display text-base font-semibold">Ações Recomendadas</h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          O sistema analisa seus dados e te diz exatamente o que fazer pra otimizar o estoque.
-        </p>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        O sistema analisa os dados do estoque e diz o que fazer. Quanto mais completo o cadastro, mais confiáveis as sugestões.
+      </p>
 
-      {/* S1 — O que comprar agora */}
-      <SecaoSugestaoCompra onVerTodos={() => onDrillDown('sugestao')} />
+      <GrupoPainel step="1" titulo="Saúde do cadastro" dica="o que falta preencher para as sugestões fazerem sentido">
+        <SaudeCadastro saude={saude} ir={ir} />
+      </GrupoPainel>
 
-      {/* S2 — Quando comprar */}
-      <SecaoPontoPedido onVerTodos={() => onDrillDown('ponto-pedido')} />
-
-      {/* S3 — Como reorganizar */}
-      <SecaoReorganizar onVerTodos={() => onDrillDown('mover')} />
-
-      {/* S4 — O que está parado */}
-      <SecaoLeadTime onVerTodos={() => onDrillDown('lead-time')} />
+      <GrupoPainel step="2" titulo="O que fazer" dica="comprar, repor, reorganizar, liberar capital">
+        <SecaoSugestaoCompra saude={saude} ir={ir} onVerTodos={() => onDrillDown('sugestao')} />
+        <SecaoPontoPedido saude={saude} ir={ir} onVerTodos={() => onDrillDown('ponto-pedido')} />
+        <SecaoReorganizar saude={saude} ir={ir} onVerTodos={() => onDrillDown('mover')} />
+        <SecaoLeadTime saude={saude} ir={ir} onVerTodos={() => onDrillDown('lead-time')} />
+      </GrupoPainel>
     </div>
+  )
+}
+
+function SaudeCadastro({ saude, ir }: { saude: Saude; ir: (d: SubAba) => void }) {
+  const { total, carregando } = saude
+  const itens = [
+    { chave: 'minimo', rotulo: 'Estoque mínimo', com: saude.comMinimo, dica: 'Base de "o que comprar" e "quando comprar".' },
+    { chave: 'custo', rotulo: 'Custo unitário', com: saude.comCusto, dica: 'Necessário para valores em R$ e capital parado.' },
+    { chave: 'local', rotulo: 'Localização', com: saude.comLocal, dica: 'Necessário para sugerir reorganização.' },
+  ]
+  const completo = total > 0 && itens.every((i) => i.com === total) && saude.vendas90 > 0
+
+  return (
+    <CartaoPainel
+      icon={ClipboardCheck}
+      title="O que o sistema já sabe"
+      subtitle={total > 0 ? `Conta apenas os ${total} materiais ativos.` : 'Conta apenas os materiais ativos.'}
+      badge={carregando ? undefined : completo
+        ? { label: 'Cadastro completo', tom: 'ok' }
+        : { label: 'Falta preencher', tom: 'aviso' }
+      }
+    >
+      {carregando ? (
+        <CarregandoBloco altura="h-24" />
+      ) : total === 0 ? (
+        <VazioCartao
+          icon={PackageOpen}
+          title="Nenhum material ativo cadastrado"
+          description="Cadastre os materiais da loja (tecidos, ferragens, acessórios) para o sistema começar a analisar."
+          action={{ label: 'Ir para Materiais', onClick: () => ir('produtos') }}
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-px bg-border/60 sm:grid-cols-2 lg:grid-cols-4">
+          {itens.map((i) => {
+            const pct = (i.com / total) * 100
+            const falta = total - i.com
+            return (
+              <div key={i.chave} className="flex flex-col gap-2 bg-card p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{i.rotulo}</p>
+                <p className="font-display text-xl font-bold tabular-nums">
+                  {i.com}<span className="text-sm font-normal text-muted-foreground"> de {total}</span>
+                </p>
+                <BarraProgresso pct={pct} />
+                <p className="text-xs leading-snug text-muted-foreground">
+                  {falta === 0 ? 'Tudo preenchido.' : `${falta} ${falta === 1 ? 'material sem' : 'materiais sem'} esse dado. ${i.dica}`}
+                </p>
+                {falta > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => ir('produtos')}
+                    className="mt-auto self-start text-xs font-semibold text-primary hover:underline"
+                  >
+                    Completar em Materiais →
+                  </button>
+                )}
+              </div>
+            )
+          })}
+          <div className="flex flex-col gap-2 bg-card p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Vendas (90 dias)</p>
+            <p className="font-display text-xl font-bold tabular-nums">
+              {saude.vendas90}<span className="text-sm font-normal text-muted-foreground"> {saude.vendas90 === 1 ? 'venda' : 'vendas'}</span>
+            </p>
+            <BarraProgresso pct={saude.vendas90 > 0 ? 100 : 0} />
+            <p className="text-xs leading-snug text-muted-foreground">
+              {saude.vendas90 > 0
+                ? 'Histórico de saída disponível.'
+                : 'Sem vendas, o sistema não sabe o que gira. Registre em Estoque › Vendas (não nos orçamentos).'}
+            </p>
+            {saude.vendas90 === 0 && (
+              <button
+                type="button"
+                onClick={() => ir('vendas')}
+                className="mt-auto self-start text-xs font-semibold text-primary hover:underline"
+              >
+                Registrar venda →
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </CartaoPainel>
   )
 }
 
 // ─── S1: Sugestão de Compra ───────────────────────────────────────────────────
 
-function SecaoSugestaoCompra({ onVerTodos }: { onVerTodos: () => void }) {
+function SecaoSugestaoCompra({ saude, ir, onVerTodos }: SecaoProps) {
   const { data = [], isLoading } = useSugestaoCompra()
   const naoOk = data.filter(r => r.urgencia !== 'ok')
   const totalEstimado = naoOk.reduce((s, r) => s + r.custo_estimado, 0)
@@ -144,53 +342,70 @@ function SecaoSugestaoCompra({ onVerTodos }: { onVerTodos: () => void }) {
     },
   ]
 
+  const av = avaliar(saude, ['minimo', 'vendas', 'custo'], ir)
+  const pronto = !isLoading && !saude.carregando
+
   return (
-    <SectionCard
+    <CartaoPainel
       icon={ShoppingBag}
       title="O que comprar agora"
-      subtitle={isLoading ? 'Carregando…' : naoOk.length === 0 ? 'Nenhum produto precisa de reposição agora.' : `${naoOk.length} precisam de reposição · ${fmtBRL(totalEstimado)} estimado`}
-      badge={isLoading ? undefined : naoOk.length > 0
-        ? { label: `${naoOk.length} produto${naoOk.length !== 1 ? 's' : ''}`, variant: 'info' }
-        : { label: 'Tudo abastecido', variant: 'neutral' }
+      subtitle={
+        av.bloqueio || !pronto || naoOk.length === 0
+          ? 'Materiais classe A que já passaram do ideal e precisam de reposição.'
+          : `${naoOk.length} precisam de reposição · ${fmtBRL(totalEstimado)} estimado`
       }
-      defaultOpen
+      badge={!pronto ? undefined
+        : av.bloqueio ? { label: 'Dados incompletos', tom: 'aviso' }
+        : naoOk.length > 0 ? { label: `${naoOk.length} ${naoOk.length === 1 ? 'material' : 'materiais'}`, tom: 'info' }
+        : av.completo ? { label: 'Tudo abastecido', tom: 'ok' }
+        : { label: 'Nada a repor (dados parciais)', tom: 'neutro' }
+      }
     >
-      <EstoqueTable
-        columns={columns}
-        data={top10}
-        keyExtractor={(r) => r.id}
-        isLoading={isLoading}
-        emptyMessage={
-          <span className="flex items-center justify-center gap-2">
-            <CircleCheck className="h-4 w-4" />
-            Nenhum produto abaixo do ideal.
-          </span>
-        }
-        footerLeft={`${data.length} produtos classe A analisados`}
-        footerRight={
-          <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
-            Ver todos →
-          </button>
-        }
-      />
-    </SectionCard>
+      {saude.carregando ? <CarregandoBloco /> : av.bloqueioEl ?? (
+        <>
+          {av.avisos}
+          {!isLoading && naoOk.length === 0 && av.completo ? (
+            <TudoCerto texto="Nenhum material classe A abaixo do ideal." />
+          ) : (
+            <EstoqueTable
+              columns={columns}
+              data={top10}
+              keyExtractor={(r) => r.id}
+              isLoading={isLoading}
+              emptyMessage="Nenhum material abaixo do ideal entre os que têm dados completos."
+              footerLeft={`${data.length} materiais classe A analisados`}
+              footerRight={
+                <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
+                  Ver todos →
+                </button>
+              }
+            />
+          )}
+        </>
+      )}
+    </CartaoPainel>
   )
 }
 
 // ─── S2: Ponto de Pedido ──────────────────────────────────────────────────────
 
-function SecaoPontoPedido({ onVerTodos }: { onVerTodos: () => void }) {
+function SecaoPontoPedido({ saude, ir, onVerTodos }: SecaoProps) {
   const { data = [], isLoading } = useEstoquePontoPedido()
   const alertas = data.filter(r => r.nivel_alerta !== 'ok' && r.nivel_alerta !== 'sem_dados')
   const rupturas = alertas.filter(r => r.nivel_alerta === 'ruptura').length
   const criticos = alertas.filter(r => r.nivel_alerta === 'critico').length
   const top10 = alertas.slice(0, 10)
 
-  const badge = isLoading ? undefined :
-    rupturas > 0 ? { label: `${rupturas} em ruptura`, variant: 'urgent' as const } :
-    criticos > 0 ? { label: `${criticos} crítico${criticos !== 1 ? 's' : ''}`, variant: 'urgent' as const } :
-    alertas.length > 0 ? { label: `${alertas.length} em alerta`, variant: 'warning' as const } :
-    { label: 'Tudo ok', variant: 'neutral' as const }
+  const av = avaliar(saude, ['minimo', 'vendas'], ir)
+  const pronto = !isLoading && !saude.carregando
+
+  const badge = !pronto ? undefined :
+    av.bloqueio ? { label: 'Dados incompletos', tom: 'aviso' as const } :
+    rupturas > 0 ? { label: `${rupturas} em ruptura`, tom: 'urgente' as const } :
+    criticos > 0 ? { label: `${criticos} crítico${criticos !== 1 ? 's' : ''}`, tom: 'urgente' as const } :
+    alertas.length > 0 ? { label: `${alertas.length} em alerta`, tom: 'aviso' as const } :
+    av.completo ? { label: 'Tudo ok', tom: 'ok' as const } :
+    { label: 'Sem alertas (dados parciais)', tom: 'neutro' as const }
 
   type Row = typeof top10[number]
   const columns: EstoqueTableColumn<Row>[] = [
@@ -243,38 +458,41 @@ function SecaoPontoPedido({ onVerTodos }: { onVerTodos: () => void }) {
   ]
 
   return (
-    <SectionCard
+    <CartaoPainel
       icon={AlertTriangle}
       title="Quando comprar"
-      subtitle="Produtos que já passaram do ponto de pedido. Se não comprar agora, vai faltar antes da entrega chegar."
+      subtitle="Materiais que já passaram do ponto de pedido. Se não comprar agora, vai faltar antes da entrega chegar."
       badge={badge}
-      defaultOpen={false}
     >
-      <EstoqueTable
-        columns={columns}
-        data={top10}
-        keyExtractor={(r) => r.produto_id}
-        isLoading={isLoading}
-        emptyMessage={
-          <span className="flex items-center justify-center gap-2">
-            <CircleCheck className="h-4 w-4" />
-            Todos os produtos estão acima do ponto de pedido.
-          </span>
-        }
-        footerLeft={`${data.length} produtos analisados`}
-        footerRight={
-          <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
-            Ver todos →
-          </button>
-        }
-      />
-    </SectionCard>
+      {saude.carregando ? <CarregandoBloco /> : av.bloqueioEl ?? (
+        <>
+          {av.avisos}
+          {!isLoading && alertas.length === 0 && av.completo ? (
+            <TudoCerto texto="Todos os materiais estão acima do ponto de pedido." />
+          ) : (
+            <EstoqueTable
+              columns={columns}
+              data={top10}
+              keyExtractor={(r) => r.produto_id}
+              isLoading={isLoading}
+              emptyMessage="Nenhum alerta entre os materiais que têm dados completos."
+              footerLeft={`${data.length} materiais analisados`}
+              footerRight={
+                <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
+                  Ver todos →
+                </button>
+              }
+            />
+          )}
+        </>
+      )}
+    </CartaoPainel>
   )
 }
 
 // ─── S3: Lead Time ────────────────────────────────────────────────────────────
 
-function SecaoLeadTime({ onVerTodos }: { onVerTodos: () => void }) {
+function SecaoLeadTime({ saude, ir, onVerTodos }: SecaoProps) {
   const { data: rows = [], isLoading } = useLeadTimeRows()
   const comEstoque = rows.filter(r => r.quantidade_atual > 0)
   const top10 = comEstoque.slice(0, 10)
@@ -324,34 +542,53 @@ function SecaoLeadTime({ onVerTodos }: { onVerTodos: () => void }) {
     },
   ]
 
+  const av = avaliar(saude, ['custo'], ir)
+  const pronto = !isLoading && !saude.carregando
+
   return (
-    <SectionCard
+    <CartaoPainel
       icon={Clock}
       title="O que está parado"
-      subtitle="Produtos sentados no estoque há muito tempo. Cada dia parado é dinheiro empatado."
-      badge={isLoading ? undefined : { label: `${formatCurrency(valorTotal)} parado`, variant: 'warning' }}
-      defaultOpen={false}
+      subtitle="Materiais sentados no estoque há muito tempo. Cada dia parado é dinheiro empatado."
+      badge={!pronto ? undefined
+        : av.bloqueio ? { label: 'Dados incompletos', tom: 'aviso' }
+        : valorTotal > 0 ? { label: `${formatCurrency(valorTotal)} parado`, tom: 'aviso' }
+        : av.completo ? { label: 'Nada parado', tom: 'ok' }
+        : { label: 'Valor desconhecido', tom: 'neutro' }
+      }
     >
-      <EstoqueTable
-        columns={columns}
-        data={top10}
-        keyExtractor={(r) => r.produto_id}
-        isLoading={isLoading}
-        emptyMessage="Nenhum produto com estoque ativo."
-        footerLeft={`${comEstoque.length} produtos com estoque`}
-        footerRight={
-          <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
-            Ver todos →
-          </button>
-        }
-      />
-    </SectionCard>
+      {saude.carregando ? <CarregandoBloco /> : av.bloqueioEl ?? (
+        <>
+          {av.avisos}
+          {!isLoading && comEstoque.length === 0 ? (
+            <VazioCartao
+              icon={Clock}
+              title="Nenhum material com estoque"
+              description="Quando houver entradas registradas, aqui aparece há quantos dias cada material está parado."
+            />
+          ) : (
+            <EstoqueTable
+              columns={columns}
+              data={top10}
+              keyExtractor={(r) => r.produto_id}
+              isLoading={isLoading}
+              footerLeft={`${comEstoque.length} materiais com estoque`}
+              footerRight={
+                <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
+                  Ver todos →
+                </button>
+              }
+            />
+          )}
+        </>
+      )}
+    </CartaoPainel>
   )
 }
 
 // ─── S5: Reorganizar ─────────────────────────────────────────────────────────
 
-function SecaoReorganizar({ onVerTodos }: { onVerTodos: () => void }) {
+function SecaoReorganizar({ saude, ir, onVerTodos }: SecaoProps) {
   const { data: sugestoes = [], isLoading } = useEstoqueSugestoesMover()
   const top10 = sugestoes.slice(0, 10)
 
@@ -394,35 +631,43 @@ function SecaoReorganizar({ onVerTodos }: { onVerTodos: () => void }) {
     },
   ]
 
+  const av = avaliar(saude, ['local', 'vendas'], ir)
+  const pronto = !isLoading && !saude.carregando
+
   return (
-    <SectionCard
+    <CartaoPainel
       icon={ArrowLeftRight}
       title="Como reorganizar a loja"
-      subtitle="Sugestões pra deixar os produtos mais vendidos perto do balcão e os menos vendidos no fundo."
-      defaultOpen={false}
-      badge={isLoading ? undefined : sugestoes.length > 0
-        ? { label: `${sugestoes.length} ${sugestoes.length === 1 ? 'sugestão' : 'sugestões'}`, variant: 'info' }
-        : undefined
+      subtitle="Sugestões para deixar os materiais mais vendidos perto do balcão e os menos vendidos no fundo."
+      badge={!pronto ? undefined
+        : av.bloqueio ? { label: 'Dados incompletos', tom: 'aviso' }
+        : sugestoes.length > 0 ? { label: `${sugestoes.length} ${sugestoes.length === 1 ? 'sugestão' : 'sugestões'}`, tom: 'info' }
+        : av.completo ? { label: 'Bem alocado', tom: 'ok' }
+        : { label: 'Sem sugestões (dados parciais)', tom: 'neutro' }
       }
     >
-      <EstoqueTable
-        columns={columns}
-        data={top10}
-        keyExtractor={(r) => r.produto_id}
-        isLoading={isLoading}
-        emptyMessage={
-          <span className="flex items-center justify-center gap-2">
-            <CircleCheck className="h-4 w-4" />
-            Todos os produtos estão bem alocados.
-          </span>
-        }
-        footerLeft={`${sugestoes.length} ${sugestoes.length === 1 ? 'sugestão' : 'sugestões'}`}
-        footerRight={
-          <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
-            Ver todos →
-          </button>
-        }
-      />
-    </SectionCard>
+      {saude.carregando ? <CarregandoBloco /> : av.bloqueioEl ?? (
+        <>
+          {av.avisos}
+          {!isLoading && sugestoes.length === 0 && av.completo ? (
+            <TudoCerto texto="Todos os materiais estão bem alocados." />
+          ) : (
+            <EstoqueTable
+              columns={columns}
+              data={top10}
+              keyExtractor={(r) => r.produto_id}
+              isLoading={isLoading}
+              emptyMessage="Nenhuma sugestão entre os materiais que já têm localização."
+              footerLeft={`${sugestoes.length} ${sugestoes.length === 1 ? 'sugestão' : 'sugestões'}`}
+              footerRight={
+                <button onClick={onVerTodos} className="text-xs font-semibold text-primary hover:underline">
+                  Ver todos →
+                </button>
+              }
+            />
+          )}
+        </>
+      )}
+    </CartaoPainel>
   )
 }

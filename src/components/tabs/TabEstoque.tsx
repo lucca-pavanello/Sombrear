@@ -6,6 +6,8 @@ import EstoqueDashboard from '@/components/estoque/dashboard/EstoqueDashboard'
 import EstoqueProdutosTable from '@/components/estoque/EstoqueProdutosTable'
 import NovoProdutoForm from '@/components/estoque/NovoProdutoForm'
 import NovaMovimentacaoForm from '@/components/estoque/NovaMovimentacaoForm'
+import ContagemFotoModal from '@/components/estoque/contagem/ContagemFotoModal'
+import { Camera } from 'lucide-react'
 import FornecedoresTable from '@/components/estoque/FornecedoresTable'
 import EntradaRapidaForm from '@/components/estoque/EntradaRapidaForm'
 import EntradasHistoricoTable from '@/components/estoque/EntradasHistoricoTable'
@@ -66,6 +68,7 @@ export default function TabEstoque({ toast, subTab }: Props) {
   const [movTipo, setMovTipo] = useState<TipoMov>('entrada')
   const [movProduto, setMovProduto] = useState<EstoqueProduto | null>(null)
   const [vendaDetalheId, setVendaDetalheId] = useState<string | null>(null)
+  const [contagemFotoOpen, setContagemFotoOpen] = useState(false)
 
   // Data
   const { data: produtos = [] } = useEstoqueProdutos()
@@ -134,11 +137,20 @@ export default function TabEstoque({ toast, subTab }: Props) {
 
       {subTab === 'produtos' && (
         <div className="space-y-5">
-          <div>
-            <h3 className="font-display text-sm font-semibold">Materiais</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Tudo que a loja tem em estoque para produzir: tecidos, ferragens, acessórios e miudezas. Cada material vira uma 'ficha' que o sistema usa pra todos os cálculos.
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h3 className="font-display text-sm font-semibold">Materiais</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Tudo que a loja tem em estoque para produzir: tecidos, ferragens, acessórios e miudezas. Cada material vira uma 'ficha' que o sistema usa pra todos os cálculos.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setContagemFotoOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold text-primary transition-colors hover:border-primary/50 hover:bg-primary/5"
+            >
+              <Camera className="h-3.5 w-3.5" aria-hidden="true" /> Contagem por foto
+            </button>
           </div>
           <EstoqueProdutosTable
             toast={toast}
@@ -264,6 +276,14 @@ export default function TabEstoque({ toast, subTab }: Props) {
         toast={toast}
         tipoInicial={movTipo}
         produtoInicial={movProduto}
+        responsavel={responsavel}
+        userId={userId}
+      />
+
+      <ContagemFotoModal
+        open={contagemFotoOpen}
+        onClose={() => setContagemFotoOpen(false)}
+        toast={toast}
         responsavel={responsavel}
         userId={userId}
       />

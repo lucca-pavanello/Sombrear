@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import {
   Search, Plus, Pencil, ChevronUp, ChevronDown, ChevronsUpDown, Filter,
-  Download, Scissors, Check, Bookmark, RotateCcw,
+  Download, Scissors, Check, Bookmark, RotateCcw, Ruler, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { tbl } from './shared/tableStyles'
@@ -15,7 +15,7 @@ import {
 import NovaSobraForm from './NovaSobraForm'
 
 interface Props {
-  toast: (type: 'success' | 'error' | 'info', message: string) => void
+  toast: (type: 'success' | 'error' | 'info', message: string, opts?: { duration?: number; undoAction?: () => void }) => void
 }
 
 const FILTER_TYPES: Record<string, 'multi' | 'range' | 'text'> = {
@@ -39,6 +39,8 @@ const CHIP_LABELS: Record<string, string> = {
 }
 
 const PAGE_SIZE = 50
+/** Rótulo do botão de ação: só do desktop pra cima; no celular fica só o ícone. */
+const ROT_ACAO = 'hidden text-xs font-medium lg:inline'
 const FILTER_KEY = 'sombrear-estoque-sobras-filtros'
 const SORT_KEY = 'sombrear-estoque-sobras-sort'
 
@@ -49,6 +51,12 @@ function loadFiltros(): Record<string, unknown> {
 }
 
 const fmt = (n: number) => n.toFixed(2).replace('.', ',')
+
+/** Aceita "1,20" e "1.20"; vazio ou invalido = sem filtro. */
+function medida(v: string): number | null {
+  const n = parseFloat(v.replace(',', '.'))
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 
 /**
  * Sobras — peças prontas que sobraram de produção e não vão ser refeitas.
@@ -68,6 +76,8 @@ export default function SobrasTable({ toast }: Props) {
   const [filtros, setFiltros] = useState<Record<string, unknown>>(loadFiltros)
   const [openFilter, setOpenFilter] = useState<{ key: string; rect: DOMRect } | null>(null)
   const [incluirVendidas, setIncluirVendidas] = useState(false)
+  const [vaoL, setVaoL] = useState('')
+  const [vaoA, setVaoA] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editando, setEditando] = useState<EstoqueSobra | null>(null)
   const [page, setPage] = useState(1)
@@ -93,7 +103,7 @@ export default function SobrasTable({ toast }: Props) {
     }
   }, [sobras])
 
-  useEffect(() => { setPage(1) }, [search, filtros, incluirVendidas])
+  useEffect(() => { setPage(1) }, [search, filtros, incluirVendidas, vaoL, vaoA])
   useEffect(() => {
     try { localStorage.setItem(SORT_KEY, JSON.stringify(sort)) } catch { /* noop */ }
   }, [sort])
@@ -115,7 +125,15 @@ export default function SobrasTable({ toast }: Props) {
       if (temMax && valor > Number(max)) return false
       return true
     }
+    const L = medida(vaoL)
+    const A = medida(vaoA)
     return sobras.filter(s => {
+      // Medida do vão: só peça disponível que cubra largura E altura (medidas já são finais)
+      if (L !== null || A !== null) {
+        if (s.status !== 'disponivel') return false
+        if (L !== null && s.largura_m < L) return false
+        if (A !== null && s.altura_m < A) return false
+      }
       if (q && !`${nomeSobra(s)} ${s.observacao ?? ''} ${s.origem ?? ''}`.toLowerCase().includes(q)) return false
       for (const campo of ['familia', 'cor', 'status'] as const) {
         const sel = filtros[campo] as string[] | undefined
@@ -128,7 +146,7 @@ export default function SobrasTable({ toast }: Props) {
       if (!naFaixa(s.area_m2, filtros['area_m2'] as RangeState)) return false
       return true
     })
-  }, [sobras, search, filtros])
+  }, [sobras, search, filtros, vaoL, vaoA])
 
   const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -168,9 +186,22 @@ export default function SobrasTable({ toast }: Props) {
 
   async function definirStatus(s: EstoqueSobra, status: EstoqueSobra['status']) {
     try {
+      const anterior = s.status
       await statusMutation.mutateAsync({ id: s.id, status })
       const msg = status === 'vendida' ? 'vendida' : status === 'reservada' ? 'reservada' : 'de volta como disponível'
-      toast('success', `${nomeSobra(s)} ${fmt(s.largura_m)}×${fmt(s.altura_m)} marcada como ${msg}.`)
+      const texto = `${nomeSobra(s)} ${fmt(s.largura_m)}×${fmt(s.altura_m)} marcada como ${msg}.`
+      if (status === 'vendida' || status === 'reservada') {
+        toast('success', texto, {
+          duration: 8000,
+          undoAction: () => {
+            statusMutation.mutateAsync({ id: s.id, status: anterior })
+              .then(() => toast('info', `Desfeito: a peça voltou como ${STATUS_SOBRA[anterior].rotulo.toLowerCase()}.`))
+              .catch(() => toast('error', 'Não consegui desfazer. Ajuste a peça manualmente.'))
+          },
+        })
+      } else {
+        toast('success', texto)
+      }
     } catch {
       toast('error', 'Não consegui atualizar a peça.')
     }
@@ -266,6 +297,35 @@ export default function SobrasTable({ toast }: Props) {
         </button>
       </div>
 
+      <div className="flex flex-wrap items-end gap-3 border-b border-border/60 px-4 py-3">
+        <div className="flex items-center gap-1.5 pb-2 text-xs font-semibold text-foreground">
+          <Ruler className="h-4 w-4 text-primary" aria-hidden="true" />
+          Medida do vão
+        </div>
+        <label className="block">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Largura (m)</span>
+          <input value={vaoL} onChange={e => setVaoL(e.target.value)} inputMode="decimal" placeholder="1,20" aria-label="Largura do vão em metros"
+            className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+        </label>
+        <span className="pb-2 text-muted-foreground" aria-hidden="true">×</span>
+        <label className="block">
+          <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Altura (m)</span>
+          <input value={vaoA} onChange={e => setVaoA(e.target.value)} inputMode="decimal" placeholder="2,30" aria-label="Altura do vão em metros"
+            className="w-24 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+        </label>
+        <p className="min-w-[200px] flex-1 pb-2 text-xs text-muted-foreground">
+          {medida(vaoL) !== null || medida(vaoA) !== null
+            ? <>Mostrando só peças <strong className="text-foreground">disponíveis</strong> iguais ou maiores que o vão: <strong className="tabular-nums text-foreground">{sorted.length}</strong> encontrada{sorted.length !== 1 ? 's' : ''}.</>
+            : 'Digite a medida do vão do cliente para ver só as peças que servem.'}
+        </p>
+        {(vaoL || vaoA) && (
+          <button type="button" onClick={() => { setVaoL(''); setVaoA('') }}
+            className="mb-2 flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+            <X className="h-3 w-3" /> Limpar medida
+          </button>
+        )}
+      </div>
+
       <FiltrosAtivosChips
         filtros={filtros}
         filterTypes={FILTER_TYPES}
@@ -275,7 +335,7 @@ export default function SobrasTable({ toast }: Props) {
       />
 
       <div className="max-h-[70vh] overflow-auto">
-        <table className="w-full text-sm" style={{ minWidth: '900px' }}>
+        <table className="w-full text-sm" style={{ minWidth: '1040px' }}>
           <thead>
             <tr className={tbl.theadRow}>
               {thFiltro('familia', 'Tecido', 'familia')}
@@ -335,24 +395,24 @@ export default function SobrasTable({ toast }: Props) {
                       {s.status === 'disponivel' && (
                         <>
                           <button onClick={() => definirStatus(s, 'vendida')} title="Marcar como vendida"
-                            className={cn(tbl.actionBtn, 'hover:bg-emerald-500/10 hover:text-emerald-600')}>
-                            <Check className="h-4 w-4" />
+                            className={cn(tbl.actionBtn, 'gap-1 lg:!w-auto lg:px-2.5 hover:bg-emerald-500/10 hover:text-emerald-600')}>
+                            <Check className="h-4 w-4" /><span className={ROT_ACAO}>Vendida</span>
                           </button>
                           <button onClick={() => definirStatus(s, 'reservada')} title="Reservar"
-                            className={cn(tbl.actionBtn, 'hover:bg-amber-500/10 hover:text-amber-600')}>
-                            <Bookmark className="h-4 w-4" />
+                            className={cn(tbl.actionBtn, 'gap-1 lg:!w-auto lg:px-2.5 hover:bg-amber-500/10 hover:text-amber-600')}>
+                            <Bookmark className="h-4 w-4" /><span className={ROT_ACAO}>Reservar</span>
                           </button>
                         </>
                       )}
                       {s.status !== 'disponivel' && (
                         <button onClick={() => definirStatus(s, 'disponivel')} title="Voltar para disponível"
-                          className={cn(tbl.actionBtn, 'hover:bg-primary/10 hover:text-primary')}>
-                          <RotateCcw className="h-4 w-4" />
+                          className={cn(tbl.actionBtn, 'gap-1 lg:!w-auto lg:px-2.5 hover:bg-primary/10 hover:text-primary')}>
+                          <RotateCcw className="h-4 w-4" /><span className={ROT_ACAO}>Disponível</span>
                         </button>
                       )}
                       <button onClick={() => { setEditando(s); setFormOpen(true) }} title="Editar"
-                        className={cn(tbl.actionBtn, 'hover:bg-primary/10 hover:text-primary')}>
-                        <Pencil className="h-4 w-4" />
+                        className={cn(tbl.actionBtn, 'gap-1 lg:!w-auto lg:px-2.5 hover:bg-primary/10 hover:text-primary')}>
+                        <Pencil className="h-4 w-4" /><span className={ROT_ACAO}>Editar</span>
                       </button>
                     </div>
                   </td>

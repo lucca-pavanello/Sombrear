@@ -4,10 +4,13 @@ import {
 } from 'recharts'
 import {
   BarChart2, Activity, Truck, Layers, MapPin, Calendar, TrendingUp,
+  Star, RefreshCw, Trophy, ShoppingCart,
 } from 'lucide-react'
+import { useMemo, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { useMemo } from 'react'
 import { useParetoData, useGiroAnual } from '@/hooks/useEstoqueAnalytics'
+import { useEstoqueProdutos } from '@/hooks/useEstoqueProdutos'
 import { useMargemEstoque } from '@/hooks/useEstoqueMargemEstoque'
 import {
   useEstoquePerformanceFornecedor,
@@ -20,9 +23,9 @@ import ParetoChart from './dashboard/ParetoChart'
 import TopAClassTable from './dashboard/TopAClassTable'
 import RecalcularABCButton from './dashboard/RecalcularABCButton'
 import GiroMensalChart from './analises/GiroMensalChart'
-import SectionCard from './shared/SectionCard'
 import EstoqueTable, { type EstoqueTableColumn } from './shared/EstoqueTable'
 import { ClasseABC } from './shared/ClasseABC'
+import { CartaoPainel, GrupoPainel, KpiResumo, VazioCartao, CarregandoBloco, AvisoDados } from './shared/PainelEstoque'
 import type { ToastType } from '@/hooks/useToast'
 import type { CoberturaMargemRow } from '@/lib/supabase'
 
@@ -37,6 +40,11 @@ const fmtNum = (v: number, decimals = 2) =>
     maximumFractionDigits: decimals,
   }).format(v)
 
+/** Texto que explica de onde vêm os números — repetido nos estados vazios. */
+const ORIGEM_VENDAS = 'Estas análises usam as vendas registradas em Estoque › Vendas (não os orçamentos).'
+
+type Ir = (subAba: 'vendas' | 'produtos' | 'fornecedores' | 'entradas' | 'localizacoes') => void
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -46,102 +54,195 @@ interface Props {
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export default function AnalisesView({ toast }: Props) {
+  const navigate = useNavigate()
+  const ir: Ir = (subAba) => navigate(`/estoque/${subAba}`)
+
   return (
     <div className="space-y-6">
-      <SecaoCurvaAbc toast={toast} />
-      <SecaoPerformanceCategoria />
-      <SecaoMaisRentaveis />
-      <SecaoSazonalidade />
-      <SecaoGiroMensal />
-      <SecaoPerformanceFornecedor />
-      <SecaoPerformanceLocalizacao />
+      <ResumoTopo />
+
+      <GrupoPainel step="1" titulo="O que mais gira" dica="o que vende, o que rende giro">
+        <SecaoCurvaAbc toast={toast} ir={ir} />
+        <SecaoGiroMensal ir={ir} />
+      </GrupoPainel>
+
+      <GrupoPainel step="2" titulo="Dinheiro e margem" dica="quanto entra, de onde e com que lucro">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <SecaoPerformanceCategoria ir={ir} />
+          <SecaoSazonalidade ir={ir} />
+        </div>
+        <SecaoMaisRentaveis ir={ir} />
+      </GrupoPainel>
+
+      <GrupoPainel step="3" titulo="Fornecedores e espaço" dica="quem entrega e onde fica cada material">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <SecaoPerformanceFornecedor ir={ir} />
+          <SecaoPerformanceLocalizacao ir={ir} />
+        </div>
+      </GrupoPainel>
     </div>
   )
 }
 
-// ─── S1: Curva ABC / O que mais vende ────────────────────────────────────────
+// ─── Resumo no topo ───────────────────────────────────────────────────────────
 
-function SecaoCurvaAbc({ toast }: { toast: (type: ToastType, message: string) => void }) {
-  const { data: paretoData, isLoading } = useParetoData()
-  const hasData = (paretoData?.totalVendas ?? 0) >= 5
+function ResumoTopo() {
+  const { data: produtos = [], isLoading: lp } = useEstoqueProdutos()
+  const { data: giro, isLoading: lg } = useGiroAnual()
+  const { data: categorias = [], isLoading: lc } = useEstoquePerformanceCategoria()
+  const { data: fornecedores = [], isLoading: lf } = useEstoquePerformanceFornecedor()
+
+  const classeA = produtos.filter((p) => p.classificacao_abc === 'A').length
+  const classificados = produtos.filter(
+    (p) => p.classificacao_abc === 'A' || p.classificacao_abc === 'B' || p.classificacao_abc === 'C',
+  ).length
+
+  const totalVendido = categorias.reduce((s, r) => s + r.valor_vendido_90d, 0)
+  const topCategoria = categorias.reduce<(typeof categorias)[number] | null>(
+    (best, r) => (r.valor_vendido_90d > (best?.valor_vendido_90d ?? 0) ? r : best), null,
+  )
+
+  const topFornecedor = fornecedores.reduce<(typeof fornecedores)[number] | null>(
+    (best, r) => (r.total_entradas > (best?.total_entradas ?? 0) ? r : best), null,
+  )
+
+  const temGiro = !!giro && giro.vendas_reais > 0
 
   return (
-    <SectionCard
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <KpiResumo
+        icon={Star}
+        rotulo="Materiais classe A"
+        carregando={lp}
+        valor={classificados > 0 ? String(classeA) : '—'}
+        sub={classificados > 0 ? `de ${classificados} materiais classificados` : 'Registre vendas e clique em Recalcular ABC'}
+        acento="primario"
+      />
+      <KpiResumo
+        icon={RefreshCw}
+        rotulo="Giro anual"
+        carregando={lg}
+        valor={temGiro ? `${fmtNum(giro.giro_reais)}×` : '—'}
+        sub={temGiro ? 'estoque vendido e reposto em 12 meses' : 'Sem vendas nos últimos 12 meses'}
+        acento="emerald"
+      />
+      <KpiResumo
+        icon={Trophy}
+        rotulo="Categoria que mais vende"
+        carregando={lc}
+        valor={topCategoria && totalVendido > 0 ? (topCategoria.categoria ?? 'Sem tipo') : '—'}
+        sub={
+          topCategoria && totalVendido > 0
+            ? `${Math.round((topCategoria.valor_vendido_90d / totalVendido) * 100)}% do vendido em 90 dias`
+            : 'Sem vendas nos últimos 90 dias'
+        }
+      />
+      <KpiResumo
+        icon={Truck}
+        rotulo="Fornecedor mais usado"
+        carregando={lf}
+        valor={topFornecedor ? topFornecedor.nome : '—'}
+        sub={
+          topFornecedor
+            ? `${topFornecedor.total_entradas} ${topFornecedor.total_entradas === 1 ? 'entrada' : 'entradas'} em 90 dias`
+            : 'Sem entradas em 90 dias. Registre em Entradas'
+        }
+      />
+    </div>
+  )
+}
+
+// ─── Curva ABC / O que mais vende ────────────────────────────────────────────
+
+function SecaoCurvaAbc({ toast, ir }: { toast: Props['toast']; ir: Ir }) {
+  const { data: paretoData, isLoading } = useParetoData()
+  const total = paretoData?.totalVendas ?? 0
+  const hasData = total >= 5
+
+  return (
+    <CartaoPainel
       icon={BarChart2}
       title="O que mais vende"
-      subtitle="Curva ABC: 20% dos produtos geram 80% do faturamento. Estes são os que importam."
-      defaultOpen
+      subtitle="Curva ABC: poucos materiais geram a maior parte do faturamento. Top 20, últimos 90 dias."
+      badge={isLoading ? undefined : { label: `${total} ${total === 1 ? 'venda' : 'vendas'} em 90 dias`, tom: hasData ? 'neutro' : 'aviso' }}
+      acao={<RecalcularABCButton toast={toast} />}
     >
-      <div className="p-4 space-y-4">
-        {/* 3 colunas: a legenda fica no centro real, sem depender da largura do botão */}
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <span />
-          <p className="text-center text-xs text-muted-foreground">
-            Curva ABC — Top 20 produtos (últimos 90 dias)
-          </p>
-          <div className="flex justify-end">
-            <RecalcularABCButton toast={toast} />
-          </div>
+      {isLoading ? (
+        <CarregandoBloco altura="h-64" />
+      ) : !hasData ? (
+        <VazioCartao
+          icon={BarChart2}
+          title={total === 0 ? 'Nenhuma venda registrada nos últimos 90 dias' : `Só ${total} de 5 vendas necessárias`}
+          description={`A Curva ABC precisa de pelo menos 5 vendas para fazer sentido. ${ORIGEM_VENDAS}`}
+          action={{ label: 'Registrar venda', onClick: () => ir('vendas') }}
+        />
+      ) : (
+        <div className="space-y-4 p-4">
+          <ParetoChart items={paretoData?.items ?? []} isLoading={false} />
+          <TopAClassTable items={paretoData?.items ?? []} isLoading={false} />
         </div>
-        {!hasData && !isLoading ? (
-          <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-            Registre pelo menos 5 vendas para ver a Curva ABC.
-          </div>
-        ) : (
-          <>
-            <ParetoChart items={paretoData?.items ?? []} isLoading={isLoading} />
-            <TopAClassTable items={paretoData?.items ?? []} isLoading={isLoading} />
-          </>
-        )}
-      </div>
-    </SectionCard>
+      )}
+    </CartaoPainel>
   )
 }
 
-// ─── S2: Evolução do giro ─────────────────────────────────────────────────────
+// ─── Evolução do giro ─────────────────────────────────────────────────────────
 
-function SecaoGiroMensal() {
-  const { data: giro } = useGiroAnual()
+function Stat({ rotulo, valor, sub }: { rotulo: string; valor: ReactNode; sub: string }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/30 p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{rotulo}</p>
+      <p className="font-display mt-1 text-2xl font-bold tabular-nums text-foreground">{valor}</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>
+    </div>
+  )
+}
+
+function SecaoGiroMensal({ ir }: { ir: Ir }) {
+  const { data: giro, isLoading } = useGiroAnual()
+  const temDados = !!giro && giro.vendas_reais > 0
 
   return (
-    <SectionCard
+    <CartaoPainel
       icon={Activity}
       title="Evolução do giro"
-      subtitle="Quantas vezes seu estoque inteiro foi vendido e reposto em cada mês do último ano."
-      defaultOpen={false}
+      subtitle="Quantas vezes o estoque inteiro foi vendido e reposto em cada mês do último ano."
     >
-      <div className="p-4 space-y-4">
-        {giro && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/30 rounded-xl p-4">
-              <p className="text-xs uppercase tracking-wide text-orange-600 dark:text-orange-400 font-medium">GIRO ANUAL</p>
-              <p className="text-3xl font-bold text-orange-900 dark:text-orange-200">
-                {fmtNum(giro.giro_reais)}
-                <span className="text-base font-normal text-orange-700 dark:text-orange-400"> × ao ano</span>
-              </p>
-              <p className="text-xs text-orange-700/80 dark:text-orange-400/80 mt-1">
-                Quantas vezes seu estoque foi vendido e reposto nos últimos 12 meses
-              </p>
-            </div>
-            <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/30 rounded-xl p-4">
-              <p className="text-xs uppercase tracking-wide text-orange-600 dark:text-orange-400 font-medium">ESTOQUE MÉDIO</p>
-              <p className="text-3xl font-bold text-orange-900 dark:text-orange-200">{fmtBRL(giro.estoque_atual_reais)}</p>
-              <p className="text-xs text-orange-700/80 dark:text-orange-400/80 mt-1">
-                Valor médio mantido em estoque ao longo do ano
-              </p>
-            </div>
+      {isLoading ? (
+        <CarregandoBloco altura="h-72" />
+      ) : !temDados ? (
+        <VazioCartao
+          icon={Activity}
+          title="Sem vendas para calcular o giro"
+          description={`O giro compara o que foi vendido com o valor parado em estoque. ${ORIGEM_VENDAS} Os custos dos materiais vêm de Materiais.`}
+          action={{ label: 'Ir para Vendas', onClick: () => ir('vendas') }}
+        />
+      ) : (
+        <div className="space-y-4 p-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Stat
+              rotulo="Giro anual"
+              valor={<>{fmtNum(giro.giro_reais)}<span className="text-base font-normal text-muted-foreground"> × ao ano</span></>}
+              sub="Quantas vezes o estoque foi vendido e reposto nos últimos 12 meses"
+            />
+            <Stat
+              rotulo="Estoque médio"
+              valor={fmtBRL(giro.estoque_atual_reais)}
+              sub="Valor médio mantido em estoque ao longo do ano"
+            />
           </div>
-        )}
-        <GiroMensalChart />
-      </div>
-    </SectionCard>
+          <GiroMensalChart />
+        </div>
+      )}
+    </CartaoPainel>
   )
 }
 
-// ─── S3: Performance por Fornecedor ──────────────────────────────────────────
+// ─── Performance por fornecedor ──────────────────────────────────────────────
 
-function SecaoPerformanceFornecedor() {
+function SecaoPerformanceFornecedor({ ir }: { ir: Ir }) {
   const { data = [], isLoading } = useEstoquePerformanceFornecedor()
+  const semEntradas = data.length > 0 && data.every((r) => r.total_entradas === 0)
 
   type Row = typeof data[number]
   const columns: EstoqueTableColumn<Row>[] = [
@@ -155,7 +256,7 @@ function SecaoPerformanceFornecedor() {
       header: 'Lead time',
       align: 'right',
       cell: (r) => (
-        <span className="tabular-nums text-gray-600 dark:text-muted-foreground">
+        <span className="tabular-nums text-muted-foreground">
           {r.lead_time_medio_dias !== null ? r.lead_time_medio_dias + 'd' : '—'}
         </span>
       ),
@@ -168,48 +269,48 @@ function SecaoPerformanceFornecedor() {
     },
     {
       key: 'valor_comprado',
-      header: 'Valor comprado 90d',
+      header: 'Comprado 90d',
       align: 'right',
       cell: (r) => <span className="tabular-nums">{fmtBRL(r.valor_total_comprado)}</span>,
-    },
-    {
-      key: 'custo_medio',
-      header: 'Custo unit. médio',
-      align: 'right',
-      cell: (r) => <span className="tabular-nums">{fmtBRL(r.custo_unitario_medio)}</span>,
-    },
-    {
-      key: 'produtos',
-      header: 'Produtos',
-      align: 'right',
-      cell: (r) => <span className="tabular-nums">{r.produtos_fornecidos}</span>,
     },
   ]
 
   return (
-    <SectionCard
+    <CartaoPainel
       icon={Truck}
       title="Performance por fornecedor"
-      subtitle="Quem te entrega mais, mais rápido e por que preço. Use pra negociar e priorizar."
-      badge={isLoading ? undefined : { label: data.length + (data.length !== 1 ? ' fornecedores' : ' fornecedor'), variant: 'neutral' }}
-      defaultOpen={false}
+      subtitle="Quem entrega mais e mais rápido. Use para negociar e priorizar."
+      badge={isLoading || data.length === 0 ? undefined : { label: data.length + (data.length !== 1 ? ' fornecedores' : ' fornecedor'), tom: 'neutro' }}
     >
-      <EstoqueTable
-        columns={columns}
-        data={data}
-        keyExtractor={(r) => r.id}
-        isLoading={isLoading}
-        emptyMessage="Nenhum fornecedor ativo encontrado."
-      />
-    </SectionCard>
+      {isLoading ? (
+        <CarregandoBloco />
+      ) : data.length === 0 ? (
+        <VazioCartao
+          icon={Truck}
+          title="Nenhum fornecedor ativo"
+          description="Cadastre seus fornecedores e registre as compras em Entradas; o lead time sai das datas de pedido e chegada."
+          action={{ label: 'Ir para Fornecedores', onClick: () => ir('fornecedores') }}
+        />
+      ) : (
+        <>
+          {semEntradas && (
+            <AvisoDados
+              texto="Nenhuma compra registrada nos últimos 90 dias, então valores e lead time ainda estão zerados."
+              acao={{ label: 'Registrar entrada', onClick: () => ir('entradas') }}
+            />
+          )}
+          <EstoqueTable columns={columns} data={data} keyExtractor={(r) => r.id} />
+        </>
+      )}
+    </CartaoPainel>
   )
 }
 
-// ─── S_NEW: Os mais rentáveis ─────────────────────────────────────────────────
+// ─── Os mais rentáveis ────────────────────────────────────────────────────────
 
 type RentavelRow = CoberturaMargemRow & { lucro_unitario: number | null }
 
-function SecaoMaisRentaveis() {
+function SecaoMaisRentaveis({ ir }: { ir: Ir }) {
   const { data: rawRows = [], isLoading } = useMargemEstoque()
 
   const rows: RentavelRow[] = useMemo(() => {
@@ -228,7 +329,7 @@ function SecaoMaisRentaveis() {
   const columns: EstoqueTableColumn<RentavelRow>[] = [
     {
       key: 'produto',
-      header: 'Produto',
+      header: 'Material',
       cell: (r) => (
         <div className="flex flex-col">
           <span className="text-sm font-medium">{r.nome}</span>
@@ -292,29 +393,33 @@ function SecaoMaisRentaveis() {
   ]
 
   return (
-    <SectionCard
+    <CartaoPainel
       icon={TrendingUp}
       title="Os mais rentáveis"
-      subtitle="Produtos com maior margem de contribuição — (preço − custo) ÷ preço. Top 20."
-      badge={isLoading ? undefined : { label: `${rows.length} produtos`, variant: 'neutral' }}
-      defaultOpen={false}
+      subtitle="Materiais com maior margem de contribuição: (preço de venda − custo) ÷ preço. Top 20."
+      badge={isLoading || rows.length === 0 ? undefined : { label: `${rows.length} ${rows.length === 1 ? 'material' : 'materiais'}`, tom: 'neutro' }}
     >
-      <EstoqueTable
-        columns={columns}
-        data={rows}
-        keyExtractor={(r) => r.produto_id}
-        isLoading={isLoading}
-        emptyMessage="Nenhum produto com preço e custo definidos."
-      />
-    </SectionCard>
+      {isLoading ? (
+        <CarregandoBloco />
+      ) : rows.length === 0 ? (
+        <VazioCartao
+          icon={TrendingUp}
+          title="Nenhum material com preço de venda e custo"
+          description="A margem só aparece quando o material tem custo unitário e preço de venda preenchidos na ficha dele."
+          action={{ label: 'Ir para Materiais', onClick: () => ir('produtos') }}
+        />
+      ) : (
+        <EstoqueTable columns={columns} data={rows} keyExtractor={(r) => r.produto_id} />
+      )}
+    </CartaoPainel>
   )
 }
 
-// ─── S4: Performance por Categoria ───────────────────────────────────────────
+// ─── Performance por categoria ───────────────────────────────────────────────
 
 const PIE_COLORS = ['#E8701A', '#FB923C', '#FDBA74', '#FED7AA', '#FFF7ED']
 
-function SecaoPerformanceCategoria() {
+function SecaoPerformanceCategoria({ ir }: { ir: Ir }) {
   const { data = [], isLoading } = useEstoquePerformanceCategoria()
 
   const totalVendido = data.reduce((s, r) => s + r.valor_vendido_90d, 0)
@@ -326,33 +431,38 @@ function SecaoPerformanceCategoria() {
   }))
 
   return (
-    <SectionCard
+    <CartaoPainel
       icon={Layers}
       title="Performance por categoria"
-      subtitle="Quanto cada tipo de produto contribui pro faturamento. Tecidos vs ferragens vs acessórios."
-      defaultOpen={false}
+      subtitle="Quanto cada tipo de material contribui no faturamento dos últimos 90 dias."
     >
       {isLoading ? (
-        <div className="p-4 space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-8 rounded bg-gray-100 dark:bg-muted/30 animate-pulse" />
-          ))}
-        </div>
+        <CarregandoBloco altura="h-64" />
       ) : data.length === 0 ? (
-        <div className="p-8 text-center text-sm text-muted-foreground">
-          Nenhum dado disponível.
-        </div>
+        <VazioCartao
+          icon={Layers}
+          title="Nenhum material com categoria"
+          description="Cadastre os materiais e escolha a categoria de cada um (tecido, ferragem, acessório…) para comparar o desempenho."
+          action={{ label: 'Ir para Materiais', onClick: () => ir('produtos') }}
+        />
+      ) : totalVendido === 0 ? (
+        <VazioCartao
+          icon={ShoppingCart}
+          title="Sem vendas nos últimos 90 dias"
+          description={`Há ${data.length} ${data.length === 1 ? 'categoria' : 'categorias'}, mas nenhuma venda para dividir entre elas. ${ORIGEM_VENDAS}`}
+          action={{ label: 'Registrar venda', onClick: () => ir('vendas') }}
+        />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-          <div className="h-56">
+        <div className="space-y-3 p-4">
+          <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={pieData}
                   cx="50%"
                   cy="50%"
-                  innerRadius={50}
-                  outerRadius={90}
+                  innerRadius={45}
+                  outerRadius={80}
                   paddingAngle={2}
                   dataKey="value"
                 >
@@ -372,72 +482,49 @@ function SecaoPerformanceCategoria() {
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground border-b border-gray-200 dark:border-border">
-                  <th className="text-center py-2 pr-3 font-medium">Categoria</th>
-                  <th className="text-center py-2 px-2 font-medium">Produtos</th>
-                  <th className="text-center py-2 px-2 font-medium">Em estoque</th>
-                  <th className="text-center py-2 px-2 font-medium">Vendido 90d</th>
-                  <th className="text-center py-2 pl-2 font-medium">% total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.map((r, i) => {
-                  const pct = totalVendido > 0
-                    ? Math.round((r.valor_vendido_90d / totalVendido) * 100)
-                    : 0
-                  const isMax = r.valor_vendido_90d === maxVendido && maxVendido > 0
-                  return (
-                    <tr
-                      key={r.categoria ?? i}
-                      className="border-b border-gray-100 dark:border-border/50 last:border-0"
-                    >
-                      <td className="py-2 pr-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="h-2.5 w-2.5 shrink-0 rounded-full"
-                            style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
-                          />
-                          <span className="font-medium capitalize">{r.categoria ?? 'Sem tipo'}</span>
-                        </div>
-                      </td>
-                      <td className="text-center py-2 px-2 tabular-nums text-gray-600 dark:text-muted-foreground">
-                        {r.total_produtos}
-                      </td>
-                      <td className="text-center py-2 px-2 tabular-nums text-gray-600 dark:text-muted-foreground">
-                        {r.valor_em_estoque !== null ? fmtBRL(r.valor_em_estoque) : '—'}
-                      </td>
-                      <td className="text-center py-2 px-2 tabular-nums">
-                        {fmtBRL(r.valor_vendido_90d)}
-                      </td>
-                      <td className={cn(
-                        'text-center py-2 pl-2 tabular-nums font-semibold',
-                        isMax ? 'text-orange-700 dark:text-orange-400' : 'text-gray-500 dark:text-muted-foreground',
-                      )}>
-                        {pct}%
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <ul className="divide-y divide-border/60">
+            {data.map((r, i) => {
+              const pct = Math.round((r.valor_vendido_90d / totalVendido) * 100)
+              const isMax = r.valor_vendido_90d === maxVendido
+              return (
+                <li key={r.categoria ?? i} className="flex items-center gap-3 py-2 text-sm">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium capitalize">{r.categoria ?? 'Sem tipo'}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {r.total_produtos} {r.total_produtos === 1 ? 'material' : 'materiais'}
+                      {r.valor_em_estoque !== null && ` · ${fmtBRL(r.valor_em_estoque)} em estoque`}
+                    </p>
+                  </div>
+                  <span className="tabular-nums">{fmtBRL(r.valor_vendido_90d)}</span>
+                  <span className={cn(
+                    'w-10 text-right tabular-nums font-semibold',
+                    isMax ? 'text-primary' : 'text-muted-foreground',
+                  )}>
+                    {pct}%
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
         </div>
       )}
-    </SectionCard>
+    </CartaoPainel>
   )
 }
 
-// ─── S5: Performance por Localização ─────────────────────────────────────────
+// ─── Performance por localização ─────────────────────────────────────────────
 
-function SecaoPerformanceLocalizacao() {
+function SecaoPerformanceLocalizacao({ ir }: { ir: Ir }) {
   const { data = [], isLoading } = useEstoquePerformanceLocalizacao()
 
   const avgVendido = data.length > 0
     ? data.reduce((s, r) => s + r.valor_vendido_90d, 0) / data.length
     : 0
+  const semVendas = data.length > 0 && avgVendido === 0
 
   const isOportunidade = (r: { nivel_acesso: string | null; valor_vendido_90d: number }) =>
     (r.nivel_acesso === 'balcao' || r.nivel_acesso === 'acessivel') &&
@@ -449,38 +536,28 @@ function SecaoPerformanceLocalizacao() {
     {
       key: 'codigo',
       header: 'Local',
-      cell: (r) => <span className="font-mono font-medium">{r.codigo}</span>,
-    },
-    {
-      key: 'setor',
-      header: 'Setor',
       cell: (r) => (
-        <span className="text-gray-600 dark:text-muted-foreground capitalize">
-          {r.setor ?? '—'}
-        </span>
+        <div className="flex flex-col">
+          <span className="font-mono font-medium">{r.codigo}</span>
+          {r.setor && <span className="text-xs capitalize text-muted-foreground">{r.setor}</span>}
+        </div>
       ),
     },
     {
       key: 'nivel',
       header: 'Nível',
       cell: (r) => (
-        <span className="inline-flex h-6 px-2 items-center rounded-full text-xs font-medium bg-gray-50 text-gray-600 border border-gray-200 dark:bg-muted/20 dark:text-muted-foreground dark:border-border">
+        <span className="inline-flex h-6 items-center rounded-full border border-border bg-muted/40 px-2 text-xs font-medium text-muted-foreground">
           {NIVEIS_ACESSO[r.nivel_acesso ?? ''] ?? r.nivel_acesso ?? '—'}
         </span>
       ),
-    },
-    {
-      key: 'produtos',
-      header: 'Produtos',
-      align: 'right',
-      cell: (r) => <span className="tabular-nums">{r.total_produtos}</span>,
     },
     {
       key: 'estoque',
       header: 'Estoque',
       align: 'right',
       cell: (r) => (
-        <span className="tabular-nums text-gray-600 dark:text-muted-foreground">
+        <span className="tabular-nums text-muted-foreground">
           {r.valor_em_estoque !== null ? fmtBRL(r.valor_em_estoque) : '—'}
         </span>
       ),
@@ -496,40 +573,57 @@ function SecaoPerformanceLocalizacao() {
   const temOportunidade = data.some(isOportunidade)
 
   return (
-    <SectionCard
+    <CartaoPainel
       icon={MapPin}
       title="Performance por localização"
-      subtitle="Quais lugares da loja geram mais vendas. Útil pra decidir reorganizações ou aproveitar pontos quentes."
-      defaultOpen={false}
+      subtitle="Quais lugares da loja geram mais vendas. Ajuda a reorganizar e aproveitar pontos quentes."
+      badge={isLoading || data.length === 0 ? undefined : { label: `${data.length} ${data.length === 1 ? 'local' : 'locais'}`, tom: 'neutro' }}
     >
-      <EstoqueTable
-        columns={columns}
-        data={data}
-        keyExtractor={(r) => r.id}
-        isLoading={isLoading}
-        emptyMessage="Nenhuma localização ativa encontrada."
-        rowClassName={(r) => isOportunidade(r) ? 'bg-amber-50/30 dark:bg-amber-950/10' : undefined}
-        footerLeft={
-          temOportunidade ? (
-            <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-              <span className="h-2.5 w-2.5 rounded-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700" />
-              Locais visíveis com vendas abaixo da média — considere reorganizar
-            </span>
-          ) : undefined
-        }
-      />
-    </SectionCard>
+      {isLoading ? (
+        <CarregandoBloco />
+      ) : data.length === 0 ? (
+        <VazioCartao
+          icon={MapPin}
+          title="Nenhuma localização cadastrada"
+          description="Cadastre as prateleiras e gavetas e diga onde cada material fica; só assim dá para ver quais locais vendem mais."
+          action={{ label: 'Ir para Localizações', onClick: () => ir('localizacoes') }}
+        />
+      ) : (
+        <>
+          {semVendas && (
+            <AvisoDados
+              texto="Ainda não há vendas ligadas a estes locais nos últimos 90 dias, por isso a coluna de vendas está zerada."
+              acao={{ label: 'Ir para Vendas', onClick: () => ir('vendas') }}
+            />
+          )}
+          <EstoqueTable
+            columns={columns}
+            data={data}
+            keyExtractor={(r) => r.id}
+            rowClassName={(r) => isOportunidade(r) ? 'bg-amber-50/30 dark:bg-amber-950/10' : undefined}
+            footerLeft={
+              temOportunidade ? (
+                <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-amber-100 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700" />
+                  Locais visíveis com vendas abaixo da média: considere reorganizar
+                </span>
+              ) : undefined
+            }
+          />
+        </>
+      )}
+    </CartaoPainel>
   )
 }
 
-// ─── S6: Sazonalidade ─────────────────────────────────────────────────────────
+// ─── Sazonalidade ─────────────────────────────────────────────────────────────
 
 const MES_ABREV: Record<number, string> = {
   1: 'Jan', 2: 'Fev', 3: 'Mar', 4: 'Abr', 5: 'Mai', 6: 'Jun',
   7: 'Jul', 8: 'Ago', 9: 'Set', 10: 'Out', 11: 'Nov', 12: 'Dez',
 }
 
-function SecaoSazonalidade() {
+function SecaoSazonalidade({ ir }: { ir: Ir }) {
   const { data = [], isLoading } = useEstoqueSazonalidade()
 
   const maxFaturamento = data.length > 0 ? Math.max(...data.map(r => r.faturamento)) : 0
@@ -579,7 +673,7 @@ function SecaoSazonalidade() {
       header: 'Ticket médio',
       align: 'right',
       cell: (r) => (
-        <span className="tabular-nums text-gray-600 dark:text-muted-foreground">
+        <span className="tabular-nums text-muted-foreground">
           {r.ticket_medio > 0 ? fmtBRL(r.ticket_medio) : '—'}
         </span>
       ),
@@ -587,102 +681,87 @@ function SecaoSazonalidade() {
   ]
 
   return (
-    <SectionCard
+    <CartaoPainel
       icon={Calendar}
       title="Sazonalidade"
-      subtitle="Como suas vendas variam mês a mês. Identifique meses fortes e fracos pra planejar compras e promoções."
-      defaultOpen={false}
+      subtitle="Como as vendas variam mês a mês. Meses fortes e fracos para planejar compras e promoções."
     >
-      <div className="p-4 space-y-4">
-        {isLoading ? (
-          <div className="h-64 rounded bg-gray-100 dark:bg-muted/30 animate-pulse" />
-        ) : data.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-            Nenhuma venda registrada nos últimos 12 meses.
+      {isLoading ? (
+        <CarregandoBloco altura="h-64" />
+      ) : data.length === 0 ? (
+        <VazioCartao
+          icon={Calendar}
+          title="Nenhuma venda nos últimos 12 meses"
+          description={`Com algumas semanas de vendas registradas já dá para ver o ritmo de cada mês. ${ORIGEM_VENDAS}`}
+          action={{ label: 'Registrar venda', onClick: () => ir('vendas') }}
+        />
+      ) : (
+        <div className="space-y-4 p-4">
+          <div className="h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis
+                  dataKey="mes"
+                  tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tickFormatter={(v: number) =>
+                    new Intl.NumberFormat('pt-BR', {
+                      notation: 'compact',
+                      style: 'currency',
+                      currency: 'BRL',
+                      maximumFractionDigits: 0,
+                    }).format(v)
+                  }
+                  tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={64}
+                />
+                <Tooltip
+                  formatter={(value: number) => [fmtBRL(value), 'Faturamento']}
+                  contentStyle={{
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                  }}
+                />
+                <Bar dataKey="faturamento" radius={[4, 4, 0, 0]} isAnimationActive animationDuration={700} animationEasing="ease-out">
+                  {chartData.map((entry, index) => (
+                    <Cell key={index} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-        ) : (
-          <>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis
-                    dataKey="mes"
-                    tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tickFormatter={(v: number) =>
-                      new Intl.NumberFormat('pt-BR', {
-                        notation: 'compact',
-                        style: 'currency',
-                        currency: 'BRL',
-                        maximumFractionDigits: 0,
-                      }).format(v)
-                    }
-                    tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={64}
-                  />
-                  <Tooltip
-                    formatter={(value: number) => [fmtBRL(value), 'Faturamento']}
-                    contentStyle={{
-                      backgroundColor: 'var(--background)',
-                      border: '1px solid var(--border)',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
-                  />
-                  <Bar dataKey="faturamento" radius={[4, 4, 0, 0]} isAnimationActive animationDuration={700} animationEasing="ease-out">
-                    {chartData.map((entry, index) => (
-                      <Cell key={index} fill={entry.fill} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+
+          {(mesPico || mesFraco) && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {mesPico && (
+                <Stat rotulo="Mês de pico" valor={<span className="text-base">{mesPico.mes_nome} {mesPico.ano}</span>} sub={fmtBRL(mesPico.faturamento)} />
+              )}
+              {mesFraco && mesFraco !== mesPico && (
+                <Stat rotulo="Mês mais fraco" valor={<span className="text-base">{mesFraco.mes_nome} {mesFraco.ano}</span>} sub={fmtBRL(mesFraco.faturamento)} />
+              )}
+              {variacao !== null && variacao > 1 && (
+                <Stat rotulo="Variação" valor={<span className="text-base">{fmtNum(variacao, 1)}×</span>} sub="entre pico e vale" />
+              )}
             </div>
+          )}
 
-            {(mesPico || mesFraco) && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {mesPico && (
-                  <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/30 rounded-xl p-3">
-                    <p className="text-xs uppercase tracking-wide text-orange-600 dark:text-orange-400 font-medium">MÊS DE PICO</p>
-                    <p className="text-base font-bold text-orange-900 dark:text-orange-200 mt-0.5">
-                      {mesPico.mes_nome} {mesPico.ano}
-                    </p>
-                    <p className="text-xs text-orange-700/80 dark:text-orange-400/80">{fmtBRL(mesPico.faturamento)}</p>
-                  </div>
-                )}
-                {mesFraco && mesFraco !== mesPico && (
-                  <div className="bg-gray-50 dark:bg-muted/20 border border-gray-200 dark:border-border rounded-xl p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">MÊS MAIS FRACO</p>
-                    <p className="text-base font-semibold text-foreground mt-0.5">
-                      {mesFraco.mes_nome} {mesFraco.ano}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{fmtBRL(mesFraco.faturamento)}</p>
-                  </div>
-                )}
-                {variacao !== null && variacao > 1 && (
-                  <div className="bg-gray-50 dark:bg-muted/20 border border-gray-200 dark:border-border rounded-xl p-3">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground font-medium">VARIAÇÃO</p>
-                    <p className="text-base font-semibold text-foreground mt-0.5">{fmtNum(variacao, 1)}×</p>
-                    <p className="text-xs text-muted-foreground">entre pico e vale</p>
-                  </div>
-                )}
-              </div>
-            )}
-
+          <div className="overflow-hidden rounded-lg border border-border">
             <EstoqueTable
               columns={columns}
               data={data}
               keyExtractor={(r) => r.ano + '-' + r.mes_numero}
-              isLoading={false}
             />
-          </>
-        )}
-      </div>
-    </SectionCard>
+          </div>
+        </div>
+      )}
+    </CartaoPainel>
   )
 }
