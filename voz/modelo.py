@@ -12,7 +12,11 @@ Sem passar pela China (Lucca, 21/10: nome e telefone do cliente não podem ir pa
 o modelo é aberto, então o mesmo DeepSeek roda em provedor dos EUA (deepseek-baseten,
 deepseek-together, deepseek-deepinfra). LLM=deepseek é a API oficial, na China, só para comparar.
 local/medir_cerebro.py mede o tempo até a 1ª palavra de cada um com o prompt real e confere que não
-veio raciocínio. Chaves em ~/.secrets/sombrear-voz.env."""
+veio raciocínio. Chaves em ~/.secrets/sombrear-voz.env.
+
+Padrão desde 21/10: Baseten. Medido com o prompt real: 0,34 s até a 1ª palavra (o oficial 0,92 s),
+98% do prompt do cache, sem raciocínio; US$ 0,30 / 0,007 (cache) / 1,20 por milhão, ~US$ 0,002 por
+ligação de 3 min. Mesmos testes do oficial."""
 
 import os
 
@@ -47,7 +51,7 @@ OUTROS = {
 
 
 def criar_llm() -> openai.LLM:
-    qual = os.environ.get("LLM", "deepseek")
+    qual = os.environ.get("LLM", "deepseek-baseten")
     if qual in OUTROS:
         modelo, (url, chave), raciocinio = OUTROS[qual]
         if isinstance(raciocinio, dict):
