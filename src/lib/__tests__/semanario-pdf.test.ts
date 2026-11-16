@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Orcamento } from '../supabase'
-import { montarTabelaSemanario, partesDoPdf, type NivelCustoPdf } from '../semanarioPdf'
+import { dividirRotulo, montarTabelaSemanario, partesDoPdf, type NivelCustoPdf } from '../semanarioPdf'
 
 type Detalhe = NonNullable<Orcamento['custos_detalhe']>
 const parte = (rotulo: string, real: number): Detalhe[number] => ({ parte: rotulo, tabela: real, fator: 1, real })
@@ -102,6 +102,31 @@ describe('partesDoPdf', () => {
   })
 })
 
+describe('dividirRotulo', () => {
+  it.each([
+    ['Tecido — rolo 1,50m a R$ 31,00/m²', 'Tecido', 'rolo 1,50m a R$ 31,00/m²'],
+    ['Ferragem Rolô branca — tubo 38mm', 'Ferragem', 'Rolô branca — tubo 38mm'],
+    ['Estrutura motorizada — 2,00m, até 6,00 (grupo 41/sem-juncao) × 2', 'Estrutura', 'motorizada — 2,00m, até 6,00 (grupo 41/sem-juncao) × 2'],
+    ['Controle 6 canais', 'Controle', '6 canais'],
+    ['Junção 53mm', 'Junção', '53mm'],
+    ['Bandô branco — 4,00m', 'Bandô', 'branco — 4,00m'],
+    ['Kit Box branco', 'Kit Box', 'branco'],
+    ['Motor motor (110 / 220) (pç) 6n até 16 kg × 2', 'Motor', '(110 / 220) 6n até 16 kg × 2'],
+    ['Motor', 'Motor', ''],
+    ['Tecido  —  rolo 2,00m', 'Tecido', 'rolo 2,00m'],
+  ])('%s', (rotulo, categoria, detalhe) => {
+    expect(dividirRotulo(rotulo)).toEqual({ categoria, detalhe })
+  })
+
+  it('só tira a categoria repetida se for a palavra inteira', () => {
+    expect(dividirRotulo('Motor motorizado 6n').detalhe).toBe('motorizado 6n')
+  })
+
+  it('"(pç)" some em qualquer posição', () => {
+    expect(dividirRotulo('Motor 6n (pç) até 16 kg').detalhe).toBe('6n até 16 kg')
+  })
+})
+
 const HEAD_ATUAL = ['Data', 'Pedido', 'Cliente', 'Produto', 'Cliente pagou', 'Parcela', 'Pagamento', 'À parceira', 'Sobra']
 
 describe('montarTabelaSemanario', () => {
@@ -143,6 +168,7 @@ describe('montarTabelaSemanario', () => {
       'Controle 6 canais',
     ])
     expect(t.partes[0][0].valor).toMatch(/^R\$\s186,00$/)
+    expect(t.partes[0][1]).toMatchObject({ categoria: 'Motor', detalhe: '(110 / 220) 6n até 16 kg × 2' })
     expect(t.colProduto).toBe(3)
     expect(t.colCusto).toBe(4)
   })

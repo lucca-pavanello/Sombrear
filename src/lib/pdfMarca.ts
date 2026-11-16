@@ -28,7 +28,7 @@ const FONE = fmtFone(import.meta.env.VITE_WHATSAPP_LOJA as string | undefined)
 const CNPJ = ((import.meta.env.VITE_CNPJ_LOJA as string | undefined) ?? '').trim() || null
 
 /** Estilos de tabela compartilhados (autoTable) */
-const LINHA_QUENTE: [number, number, number] = [226, 217, 208]
+export const LINHA_QUENTE: [number, number, number] = [226, 217, 208]
 
 export const TEMA_TABELA = {
   theme: 'striped' as const,
