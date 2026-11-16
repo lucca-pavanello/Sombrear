@@ -23,12 +23,13 @@ from typing import Literal
 import aiohttp
 from dotenv import load_dotenv
 from num2words import num2words
-from livekit import agents
+from livekit import agents, rtc
 from livekit.agents import (Agent, AgentServer, AgentSession, APIConnectOptions, ChatContext, ModelSettings,
                             RunContext, StopResponse, ToolError, function_tool, inference, llm, stt, tts)
 from livekit.agents.utils import is_given
 from livekit.agents.voice.agent_session import SessionConnectOptions
-from livekit.plugins import openai, silero
+from livekit.agents.voice import room_io
+from livekit.plugins import noise_cancellation, openai, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 try:  # vozes pagas do teste às cegas (grupo "local"); o LiveKit exige registrar plugin na abertura
@@ -37,12 +38,14 @@ except ImportError:  # pragma: no cover
     cartesia = elevenlabs = None
 
 from agenda import FUSO
+from ditado import Ditado, pediu_telefone
 from frases import TrechosCurtos
 from ligacao import Ligacao, enviar, enviar_audio, so_digitos
 from reacao import TODAS as REACOES, Reacoes, grupo, sem_reacao
 from sem_silencio import (FALA_CALCULAR, FALA_CALCULAR_CURTA, FALA_ERRO, FALA_ESPERA, FALA_REPETIR, FALAS, Vigia,
                           ESPERA, ESPERA_DEPOIS_DA_CONTA, com_espera, fala_calcular, sem_anuncio)
 from modelo import criar_llm
+from ouvido import PALAVRAS_DA_LOJA
 
 load_dotenv(".env.local")
 
@@ -157,7 +160,9 @@ uma pessoa da loja atende: direta, resolutiva, informal e boa de trato. Nada de 
 Agora é {DIAS[agora.weekday()]}, {agora:%d/%m/%Y %H:%M}. Você já disse: "{abertura(agora)}"
 Nunca se apresente nem cumprimente de novo. Se o cliente responder só com cumprimento ou "alô?" (ele
 ainda está chegando na ligação), NÃO devolva o "bom dia" nem o "boa tarde": diga que está ali e siga,
-ex.: "Oi, tô aqui. É sobre persiana ou cortina?". Se ele já disse o que quer, vá direto ao assunto.
+ex.: "Oi, tô aqui. É sobre persiana ou cortina?". O "tô aqui" é SÓ para fala sem nada além de
+cumprimento ou "alô?". Se a fala tem pergunta ou pedido ("Oi, quanto custa uma persiana?"), nunca
+comece com "tô aqui": vá direto ao assunto (simulação de 22/10: "Oi, tô aqui" em 4 de 7 ligações).
 
 Se perguntarem se você é robô, IA ou gravação: confirme com naturalidade, "Sou a assistente virtual
 da Sombrear, te atendo por aqui e o que precisar de mais detalhe eu passo pro time". É proibido negar
@@ -165,6 +170,8 @@ ou dizer que é uma pessoa, e nunca finja estar na loja. Fora isso, não anuncie
 
 # Como falar (é telefone)
 - Uma ou duas frases por vez e UMA pergunta por vez. Cliente falou pouco, você fala pouco.
+- Se o cliente fez duas perguntas seguidas, responda as duas, curto, antes de seguir (na simulação de
+  21/10 ela respondeu "é robô?" e esqueceu o "instalam em Mirassol?" que veio logo depois).
 - Nunca anuncie a lista do que precisa ("preciso do modelo e da medida"): peça um dado, espere a
   resposta, peça o próximo.
 - Comece a resposta reagindo curto ao que ele disse ("Entendi.", "Certo.", "Ah, legal.", "Tá joia."),
@@ -202,12 +209,14 @@ A) Orçamento ou dúvida de produto (a maioria das ligações):
    como "pode ser" conta como sim. Medida do vão: diga só "a gente já dá os aumentos necessários".
    Com isso, calcule e fale o valor na própria ligação.
 4. Depois do valor, ofereça mandar por escrito no WhatsApp ("Quer que eu te mande esse orçamento
-   no WhatsApp também?").
+   no WhatsApp também?"). Só "obrigado", "vou pensar" ou "vou ver" não é sim: não peça nome nem
+   telefone, encerre com educação (simulação de 22/10: pediu o nome depois do "vou pensar").
 5. Para o WhatsApp (foto ou orçamento), peça o nome (só o nome, não o completo) e o telefone com
    DDD, um de cada vez.
-   Confira o telefone repetindo os números em grupos ("dezessete, nove nove um dois três, quatro
-   cinco seis sete, isso?"). Aí chame anotar_contato e diga que o time vai te chamar no WhatsApp
-   nesse número, sem prometer quando (nada de "já já" ou "hoje").
+   Para conferir o telefone, chame conferir_telefone com os números que ele disse e fale o
+   "fale_assim" do resultado palavra por palavra, sem repetir os números de cabeça. Com o sim, chame
+   anotar_contato e diga que o time vai te chamar no WhatsApp nesse número, sem prometer quando
+   (nada de "já já" ou "hoje"). Se ele corrigir, chame conferir_telefone de novo com o número certo.
 
 B) Qualquer outro assunto (pedido já feito, entrega, instalação marcada, assistência, falar com
 alguém da loja, fornecedor): não tente resolver e não peça número de pedido, data de compra nem
@@ -229,6 +238,10 @@ despedida é dita por ela, então NÃO fale a despedida antes de chamar.
 - Nunca encerre no meio de uma pergunta do cliente, nem antes de anotar o contato quando ele quis
   ser chamado. Se ele perguntou algo, responda e espere: só encerre num turno em que ele não
   perguntou nada. Depois de se despedir, não puxe assunto novo.
+- Exceção: ele perguntou e já se despediu na mesma fala ("instala em Mirassol? Obrigada, tchau"):
+  a resposta vai dentro da despedida do encerrar_ligacao ("Instala sim, em Mirassol também.
+  Obrigada, tchau!"), sem pergunta nova (simulação de 22/10: respondeu e perguntou "persiana ou
+  cortina?" depois do tchau).
 - Depois de encerrar_ligacao você fica em silêncio. Não responda ao agradecimento e não explique
   nada sobre a ligação ou sobre desligar.
 
@@ -303,6 +316,20 @@ def para_falar(r: dict) -> str:
     return frase + "."
 
 
+DIGITOS = ["zero", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove"]
+
+
+def telefone_falado(numeros: str) -> str:
+    """17996185177 -> "dezessete, nove nove seis um oito, cinco um sete sete": DDD por extenso e o
+    resto dígito a dígito, em dois grupos (5 + 4 no celular, 4 + 4 no fixo). Feito pelo código: na
+    ligação de 21/10 o modelo repetiu "nove nove seis um, oito cinco um, sete sete sete" para esse
+    número e o cliente disse "isso"."""
+    ddd, resto = numeros[:2], numeros[2:]
+    corte = len(resto) - 4
+    grupo = lambda g: " ".join(DIGITOS[int(d)] for d in g)  # noqa: E731
+    return f"{num2words(int(ddd), lang='pt_BR')}, {grupo(resto[:corte])}, {grupo(resto[corte:])}"
+
+
 def _resultado(r: dict) -> str:
     if not r.get("ok"):
         raise ToolError(json.dumps({"erro": r.get("erro"), "sugestoes": r.get("sugestoes")}, ensure_ascii=False))
@@ -337,6 +364,7 @@ class AmandaEquipe(Agent):
             tools, model_settings = [], ModelSettings()
         elif model_settings.tool_choice not in (None, "auto") and is_given(model_settings.tool_choice):
             model_settings = ModelSettings()
+        chat_ctx = sem_cumprimento_solto(chat_ctx)
         resposta = sem_anuncio(Agent.default.llm_node(self, chat_ctx, tools, model_settings))
         if REACAO and _reage(chat_ctx):  # a reação rápida já saiu: a resposta não começa com outra
             resposta = sem_reacao(resposta)
@@ -412,11 +440,24 @@ def _reage(chat_ctx: ChatContext) -> bool:
 
 
 def criar_voz() -> tts.TTS:
-    if VOZ == "elevenlabs":
-        kw = {"voice_id": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
+    """A voz principal (VOZ, VOZ_ID) e, com VOZ_RESERVA, uma reserva de outro fornecedor: se a principal
+    falhar no meio da ligação a Amanda segue com a reserva. Em 21/10 o crédito da Cartesia acabou e as
+    duas ligações de teste ficaram mudas do começo ao fim (402 na 1ª frase fechava a sessão)."""
+    principal = _uma_voz(VOZ, os.environ.get("VOZ_ID"))
+    reserva = os.environ.get("VOZ_RESERVA")
+    if not reserva or reserva == VOZ:
+        return principal
+    return tts.FallbackAdapter([principal, _uma_voz(reserva, os.environ.get("VOZ_RESERVA_ID"))])
+
+
+def _uma_voz(qual: str, voz_id: str | None) -> tts.TTS:
+    if "/" in qual:  # pelo LiveKit Inference (ex.: cartesia/sonic-3), no crédito da conta LiveKit, como o ouvido
+        return inference.TTS(model=qual, language="pt", **({"voice": voz_id} if voz_id else {}))
+    if qual == "elevenlabs":
+        kw = {"voice_id": voz_id} if voz_id else {}
         return elevenlabs.TTS(model="eleven_flash_v2_5", language="pt", **kw)
-    if VOZ == "cartesia":
-        kw = {"voice": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
+    if qual == "cartesia":
+        kw = {"voice": voz_id} if voz_id else {}
         # VOZ_VELOCIDADE (0,6 a 2,0) e VOZ_EMOCAO (Content, Calm, Affectionate...): amostras em
         # ~/.cache/sombrear-voz/amostras-ana-paula; sem nada, a Ana Paula do jeito que veio
         if os.environ.get("VOZ_VELOCIDADE"):
@@ -442,7 +483,10 @@ def criar_ouvido() -> stt.STT:
         return elevenlabs.STT(model="scribe_v2_realtime", language_code="pt",
                               server_vad={"vad_silence_threshold_secs": float(os.environ.get("OUVIDO_SILENCIO", "0.5"))})
     if "/" in qual:  # pelo LiveKit Inference, na conta LiveKit que já existe (ex.: deepgram/nova-3)
-        return inference.STT(model=qual, language="pt")
+        # as palavras da loja (ouvido.py) como keyterm: no áudio da ligação de 21/10, "Perciano." e
+        # "Persiana Praçalo" viraram "Persiana, para sala." e "Persiana pra sala" (local/comparar_ouvidos.py)
+        extra = {"extra_kwargs": {"keyterm": PALAVRAS_DA_LOJA}} if qual.startswith("deepgram/") else {}
+        return inference.STT(model=qual, language="pt", **extra)
     return openai.STT(model="parakeet", language="pt", base_url=URL_VOZ, api_key="local", use_realtime=False)
 
 
@@ -487,6 +531,9 @@ class AmandaCliente(AmandaEquipe):
         # depois da despedida a linha não cai na hora: espera o "obrigado, tchau" do cliente (Lucca, 20/10)
         self.motivo_saida: str | None = None
         self._saida: asyncio.Task | None = None
+        # telefone ditado aos pedaços (ditado.py): ela fica quieta e junta até ter o número inteiro
+        self.ditado = Ditado()
+        self._resto_do_ditado: asyncio.Task | None = None
 
     @staticmethod
     def instrucoes(agora: datetime) -> str:
@@ -525,6 +572,17 @@ class AmandaCliente(AmandaEquipe):
         return "anotado"
 
     @function_tool()
+    async def conferir_telefone(self, context: RunContext, telefone: str) -> str:
+        """A frase para conferir o telefone com o cliente, montada pelo código. telefone com DDD, só
+        números (17991234567). Fale o fale_assim do resultado do jeito que veio."""
+        numeros = so_digitos(telefone)
+        if len(numeros) in (12, 13) and numeros.startswith("55"):
+            numeros = numeros[2:]
+        if len(numeros) not in (10, 11):
+            raise ToolError("Telefone incompleto: peça o número com DDD de novo.")
+        return json.dumps({"fale_assim": telefone_falado(numeros) + ", isso?"}, ensure_ascii=False)
+
+    @function_tool()
     async def encerrar_ligacao(self, context: RunContext, despedida: str,
                                motivo: Literal["atendimento_concluido", "cliente_despediu",
                                                "conversa_sem_avanco", "fora_do_assunto"]) -> str:
@@ -533,8 +591,13 @@ class AmandaCliente(AmandaEquipe):
         if self._cliente_perguntou():
             raise ToolError("O cliente acabou de fazer uma pergunta: responda e espere, não encerre agora.")
         await context.wait_for_playout()
-        handle = context.session.say(despedida.strip() or "Obrigada, tchau!", add_to_chat_ctx=True)
-        await handle.wait_for_playout()
+        # ela já disse tchau no texto antes de chamar a ferramenta: não repete (simulação de 21/10,
+        # "Combinado, Marcos... tchau!" e 4 s depois "Combinado... tchau!")
+        dela = next((i.text_content or "" for i in reversed(self.chat_ctx.items)
+                     if getattr(i, "type", None) == "message" and i.role == "assistant"), "")
+        if not ela_se_despediu(dela):
+            handle = context.session.say(despedida.strip() or "Obrigada, tchau!", add_to_chat_ctx=True)
+            await handle.wait_for_playout()
         self._despedir(motivo, ESPERA_SEM_RESPOSTA)
         return None  # sem resposta do modelo: depois da despedida ela fica quieta
 
@@ -567,6 +630,16 @@ class AmandaCliente(AmandaEquipe):
         await self.desligar(self.motivo_saida or "atendimento_concluido")
 
     async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: llm.ChatMessage) -> None:
+        if self._resto_do_ditado:
+            self._resto_do_ditado.cancel()
+            self._resto_do_ditado = None
+        dela = next((m.text_content or "" for m in reversed((turn_ctx or self.chat_ctx).items)
+                     if m.type == "message" and m.role == "assistant"), "")
+        if self.ditado.segurar(new_message.text_content or "", pediu_telefone(dela)):
+            self._resto_do_ditado = asyncio.create_task(self._responder_ditado_parado())
+            raise StopResponse()  # o pedaço não entra na conversa: entra junto com o resto
+        if self.ditado.pedacos:
+            new_message.content = [self.ditado.juntar()]
         if self.motivo_saida and not self.ligacao.encerramento:
             texto = new_message.text_content or ""
             if e_despedida(texto):
@@ -576,6 +649,15 @@ class AmandaCliente(AmandaEquipe):
                 raise StopResponse()
             self._voltar_a_conversar()  # trouxe assunto novo ("ah, espera, e a instalação?"): segue a ligação
         await super().on_user_turn_completed(turn_ctx, new_message)
+
+    async def _responder_ditado_parado(self) -> None:
+        """O cliente parou no meio do número: depois de ESPERA_DITADO ela responde com o que juntou
+        (o modelo pede o que falta). Se ele ainda está falando, espera ele terminar."""
+        await asyncio.sleep(ESPERA_DITADO)
+        while self.session.user_state == "speaking":
+            await asyncio.sleep(0.2)
+        if self.ditado.pedacos:
+            self.session.generate_reply(user_input=self.ditado.juntar())
 
     def _cliente_perguntou(self) -> bool:
         """A última fala do cliente termina em pergunta? (o Deepgram pontua: "vocês instalam em
@@ -597,8 +679,10 @@ class AmandaCliente(AmandaEquipe):
 
 
 def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: AmandaCliente) -> None:
-    """Guarda a conversa, pega o número da linha (SIP) e manda tudo ao Dash quando a ligação acaba."""
+    """Guarda a conversa, pega o número da linha (SIP) e manda tudo ao Dash quando a ligação acaba.
+    Ligação simulada (lk agent simulate) não vai ao Dash: nem lead, nem WhatsApp, nem gravação."""
     lig = agente.ligacao
+    simulada = ctx.simulation_context() is not None
 
     @session.on("conversation_item_added")
     def _guardar(ev) -> None:
@@ -626,6 +710,11 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
     async def _mandar_ao_dash() -> None:
         if os.environ.get("DESLIGAR_ARQUIVO"):  # teste no PC: a conversa fica salva mesmo se o envio falhar
             salvar_conversa(lig)
+        if simulada:  # a conversa vai para o log (lk agent logs): o export da simulação não traz o texto
+            falas = "\n".join(f"  {f['em'][11:19]} {f['quem']}: {f['texto']}" for f in lig.falas)
+            print(f"ligação {lig.ref}: simulada, não vai ao Dash (contato {lig.contato}, orçamento "
+                  f"{lig.orcamento})\n{falas}", flush=True)
+            return
         resultado = await enviar(lig)
         print(f"ligação {lig.ref}: {resultado}", flush=True)
         registrar_envio(lig, resultado)
@@ -669,6 +758,8 @@ def acompanhar_ligacao(ctx: agents.JobContext, session: AgentSession, agente: Am
         if os.environ.get("DESLIGAR_ARQUIVO"):  # teste no PC: fica ao lado da conversa, para ouvir
             salvar_audio(lig, arq)
         await _uma_vez()  # a linha da ligação tem que existir no Dash antes do áudio
+        if simulada:
+            return
         resultado = await enviar_audio(lig, arq)
         print(f"áudio da ligação {lig.ref}: {resultado}", flush=True)
 
@@ -726,6 +817,8 @@ async def _desligar_quando_existir(arq: Path, agente: AmandaCliente) -> None:
 # depois da despedida: segundos de silêncio depois do "tchau" do cliente, e quanto espera se ele não
 # responder nada (Lucca, 20/10: "o cliente responde obrigado, tchau, dá uns 3, 4 segundos e desliga")
 ESPERA_TCHAU = float(os.environ.get("ESPERA_TCHAU") or 3)
+# telefone ditado que parou no meio: quanto ela espera o resto antes de responder (ditado.py)
+ESPERA_DITADO = float(os.environ.get("ESPERA_DITADO") or 3.5)
 ESPERA_SEM_RESPOSTA = float(os.environ.get("ESPERA_SEM_RESPOSTA") or 5)
 _TCHAU = re.compile(r"\b(tchau|obrigad[oa]|brigad[oa]|valeu|vlw|até|falou|beleza|tá bom|ta bom|ok|okay|"
                     r"de nada|igualmente|combinado|joia|jóia|fechou|fechado|certo|perfeito|isso|abraço|"
@@ -740,6 +833,34 @@ def termina_em_pergunta(texto: str) -> bool:
 
 
 _TCHAU_DELA = re.compile(r"\b(tchau|até mais|até logo)\b", re.IGNORECASE)
+
+
+_CUMPRIMENTO = {"oi", "ola", "olá", "alo", "alô", "bom", "boa", "dia", "tarde", "noite", "tudo", "bem", "e", "ai", "aí"}
+
+
+def so_cumprimento(texto: str) -> bool:
+    palavras = re.findall(r"\w+", texto.lower())
+    return bool(palavras) and all(p in _CUMPRIMENTO for p in palavras)
+
+
+def sem_cumprimento_solto(chat_ctx: ChatContext) -> ChatContext:
+    """"Bom dia." num turno e o pedido no seguinte: o modelo respondia aos dois e abria com "Oi, tô
+    aqui" (simulação de 22/10, 4 de 7 ligações; a regra no prompt não segurou). O cumprimento que ficou
+    sem resposta antes do pedido sai do que o modelo lê."""
+    itens = chat_ctx.items
+    msgs = [i for i, m in enumerate(itens) if m.type == "message"]
+    if len(msgs) < 2 or itens[msgs[-1]].role != "user" or so_cumprimento(itens[msgs[-1]].text_content or ""):
+        return chat_ctx
+    tirar = []
+    for i in reversed(msgs[:-1]):
+        if itens[i].role != "user" or not so_cumprimento(itens[i].text_content or ""):
+            break
+        tirar.append(i)
+    if not tirar:
+        return chat_ctx
+    copia = chat_ctx.copy()
+    copia.items[:] = [m for i, m in enumerate(itens) if i not in tirar]
+    return copia
 
 
 def ela_se_despediu(texto: str) -> bool:
@@ -816,10 +937,47 @@ def registrar_envio(lig: Ligacao, resultado: str) -> None:
 # PUBLICO=cliente (atende cliente ao telefone) ou equipe (tira dúvida da equipe da loja)
 PUBLICO = os.environ.get("PUBLICO", "cliente")
 server = AgentServer()
+# a ligação de cada job, para o veredito da simulação ler o que ela anotou
+LIGACOES: dict[str, Ligacao] = {}
+
+
+def conferir_simulacao(sim) -> None:
+    """Nosso veredito na ligação simulada (lk agent simulate), além do juiz do LiveKit: o que ela
+    anotou bate com o cenário? userdata do cenário: telefone (o certo, só números), sem_contato
+    (true: não podia anotar) e valor_4x (o total do orçamento falado)."""
+    esperado = sim.userdata()
+    lig = LIGACOES.pop(sim.job_context.job.id, None)
+    if lig is None or not esperado:
+        return
+    contato, orc = lig.contato, lig.orcamento
+    if esperado.get("sem_contato") and contato:
+        sim.fail(f"anotou contato sem precisar: {contato}")
+    if tel := esperado.get("telefone"):
+        if not contato:
+            sim.fail(f"não anotou o contato (era {tel})")
+        elif contato["telefone"] != tel:
+            sim.fail(f"anotou o telefone {contato['telefone']}, o certo era {tel}")
+    if (valor := esperado.get("valor_4x")) is not None:
+        if not orc:
+            sim.fail(f"não calculou o orçamento (era {valor})")
+        elif abs(orc["total4x"] - float(valor)) > 0.01:
+            sim.fail(f"orçou {orc['total4x']}, o certo era {valor} ({orc})")
+
+
+def tirar_ruido(params: room_io.NoiseCancellationParams):
+    """Redução de ruído na fala do cliente, antes do ouvido (incluída no LiveKit Cloud): na ligação
+    simulada com microfone ruim e barulho de fundo (21/10) ela não ouviu nada do cliente. Telefone (SIP)
+    usa o modelo feito para linha telefônica. NC=0 desliga (no PC sem o Cloud o filtro não roda)."""
+    if os.environ.get("NC", "1") != "1":
+        return None
+    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        return noise_cancellation.BVCTelephony()
+    return noise_cancellation.BVC()
 
 
 # com nome ela aparece no Agent Console do LiveKit (é por lá que se testa no celular, fase 3)
-@server.rtc_session(agent_name=os.environ.get("AGENTE_NOME", f"sombrear-{PUBLICO}"))
+@server.rtc_session(agent_name=os.environ.get("AGENTE_NOME", f"sombrear-{PUBLICO}"),
+                    on_simulation_end=conferir_simulacao)
 async def conversar(ctx: agents.JobContext) -> None:
     agora = datetime.now(FUSO)
     session = criar_sessao()
@@ -828,9 +986,13 @@ async def conversar(ctx: agents.JobContext) -> None:
     # GRAVAR=0 desliga. Só o áudio: o resto (traces, logs) não serve para a loja
     gravar = isinstance(agente, AmandaCliente) and os.environ.get("GRAVAR", "1") == "1"
     await session.start(room=ctx.room, agent=agente,
-                        record={"audio": True, "traces": False, "logs": False, "transcript": False} if gravar else False)
+                        record={"audio": True, "traces": False, "logs": False, "transcript": False} if gravar else False,
+                        room_options=room_io.RoomOptions(audio_input=room_io.AudioInputOptions(
+                            noise_cancellation=tirar_ruido)))
     if isinstance(agente, AmandaCliente):
         acompanhar_ligacao(ctx, session, agente)
+        if ctx.simulation_context() is not None:
+            LIGACOES[ctx.job.id] = agente.ligacao
     Vigia(session)
     asyncio.create_task(FALAS.preparar(session.tts, FALAS_FIXAS))
     asyncio.create_task(acordar_calculadora())
