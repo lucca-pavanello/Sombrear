@@ -22,7 +22,9 @@ import DatePicker from '@/components/ui/DatePicker'
 import { useCountUp } from '@/hooks/useCountUp'
 import { supabase, type Orcamento, type Pedido } from '@/lib/supabase'
 import { Button, EmptyState } from '@/components/ui/primitives'
-import { TEMA_TABELA, alinharSecoes, colunasCentro, colunasDireita, faixaMarca, rodapeMarca } from '@/lib/pdfMarca'
+import { faixaMarca, rodapeMarca } from '@/lib/pdfMarca'
+import { NIVEIS_CUSTO_PDF, montarTabelaSemanario, type NivelCustoPdf } from '@/lib/semanarioPdf'
+import { opcoesTabelaSemanario } from '@/lib/semanarioPdfDesenho'
 import SeloOrigem, { ORIGENS, SEM_ORIGEM, acharOrigem } from '@/components/agente/SeloOrigem'
 import JanelaDados from '@/components/orcamentos/JanelaDados'
 import ConfirmarExclusaoVenda from '@/components/orcamentos/ConfirmarExclusaoVenda'
@@ -32,6 +34,15 @@ import { ADMIN_EMAIL } from '@/lib/constants'
 import { campoCompacto, tabela, kpi } from '@/components/shared/estilos'
 
 const TabSimulador = lazyComRecarga(() => import('@/components/tabs/TabSimulador'))
+
+const CHAVE_CUSTOS_PDF = 'sombrear:semanario:custos-pdf'
+const lerNivelCustoPdf = (): NivelCustoPdf => {
+  try {
+    const v = localStorage.getItem(CHAVE_CUSTOS_PDF)
+    if (NIVEIS_CUSTO_PDF.some(n => n.value === v)) return v as NivelCustoPdf
+  } catch { /* sem storage (janela privada): fica no padrão */ }
+  return 'tecido-motor'
+}
 
 const PERIODOS = [
   { value: 'mes', label: 'Este mês' },
@@ -140,6 +151,7 @@ export default function TabFechamento() {
   const isAdmin = profile?.email === ADMIN_EMAIL || profile?.is_admin === true
   const [calculando, setCalculando] = useState(false)
   const [periodo, setPeriodo] = useState('mes')
+  const [nivelCustoPdf, setNivelCustoPdf] = useState<NivelCustoPdf>(lerNivelCustoPdf)
   const [de, setDe] = useState('')
   const [ate, setAte] = useState('')
   const [baixando, setBaixando] = useState(false)
@@ -504,47 +516,19 @@ export default function TabFechamento() {
       const doc = new jsPDF({ orientation: 'landscape' })
       const rotuloPeriodo = PERIODOS.find(p => p.value === periodo)?.label ?? ''
       const qtdPdf = gruposPdf.reduce((s, g) => s + g.itens.length, 0)
+      const comCusto = nivelCustoPdf !== 'nenhum'
       const inicioY = faixaMarca(doc, 'Semanário de vendas',
-        `${rotuloPeriodo}${de || ate ? ` (${de} a ${ate})` : ''} · ${qtdPdf} venda(s)`)
+        `${rotuloPeriodo}${de || ate ? ` (${de} a ${ate})` : ''} · ${qtdPdf} venda(s)`
+        + (comCusto ? ` · custos: ${nivelCustoPdf === 'todas' ? 'todas as partes' : 'tecido e motorização'}` : ''))
 
       /* A loja pediu (áudio 17/08): só a realidade da venda — quanto o cliente
          pagou, a parcela, a forma, quanto foi pra parceira e quanto sobrou.
          Sem "(orçado em …)", sem "4x / 6x". */
-      autoTable(doc, {
-        startY: inicioY,
-        head: [['Data', 'Pedido', 'Cliente', 'Produto', 'Cliente pagou', 'Parcela', 'Pagamento', 'À parceira', 'Sobra']],
-        body: gruposPdf.flatMap(g => {
-          const linhas = g.itens.map((o, i) => {
-            const pg = pgtoReal(o)
-            const parcela = pg.parcelas && pg.parcelas > 1 ? formatCurrency(pago(o) / pg.parcelas) : '—'
-            // pedido com vários itens: data/pedido/cliente só na primeira linha do grupo — evita repetir
-            const primeira = i === 0
-            return [
-              primeira ? formatDate(g.pedido?.data_pedido ? `${g.pedido.data_pedido}T12:00:00` : dataDe(o)) : '',
-              primeira ? (g.pedido?.numero_pedido ?? o.numero_pedido ?? '—') : '',
-              primeira ? (o.cliente ?? '—') : '',
-              [o.modelo, o.tecido].filter(Boolean).join(' · ')
-                + (o.largura && o.altura ? `\n${String(o.largura).replace('.', ',')}×${String(o.altura).replace('.', ',')}m` : ''),
-              formatCurrency(pago(o)),
-              parcela,
-              pg.forma,
-              formatCurrency(pagoParceira(o)),
-              formatCurrency(sobraItem(o)),
-            ]
-          })
-          if (g.itens.length < 2) return linhas
-          const t = totaisGrupo(g.itens)
-          return [...linhas, [
-            '', '', '', 'Total do pedido', formatCurrency(t.bruto), '', '', formatCurrency(t.parceira), formatCurrency(t.sobra),
-          ]]
-        }),
-        foot: [['', '', '', 'TOTAIS',
-          formatCurrency(totaisPdf.bruto), '', '', formatCurrency(totaisPdf.parceira), formatCurrency(totaisPdf.sobra)]],
-        ...TEMA_TABELA,
-        columnStyles: { ...colunasDireita([4, 5, 7, 8]), ...colunasCentro([1, 6]) },
-        didParseCell: alinharSecoes({ 1: 'center', 4: 'right', 5: 'right', 6: 'center', 7: 'right', 8: 'right' }),
-        margin: { left: 14, right: 14, bottom: 20 },
+      const t = montarTabelaSemanario({
+        grupos: gruposPdf, totais: totaisPdf, nivel: nivelCustoPdf,
+        pago, pagoParceira, sobraItem, pgtoReal, totaisGrupo, dataDe,
       })
+      autoTable(doc, { startY: inicioY, ...opcoesTabelaSemanario(doc, t, comCusto) })
       rodapeMarca(doc)
       doc.save(`fechamento-sombrear-${new Date().toISOString().slice(0, 10)}.pdf`)
     } finally {
@@ -855,6 +839,16 @@ export default function TabFechamento() {
                 </label>
               )
             })}
+          </div>
+          {/* o CustomSelect não aceita aria-label/title: o rótulo vai no grupo que o envolve */}
+          <div role="group" aria-label="Custos no PDF" title="Custos no PDF"
+            className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Custos no PDF</span>
+            <CustomSelect className="w-52 py-2" value={nivelCustoPdf} options={NIVEIS_CUSTO_PDF}
+              onChange={v => {
+                setNivelCustoPdf(v as NivelCustoPdf)
+                try { localStorage.setItem(CHAVE_CUSTOS_PDF, v) } catch { /* sem storage: vale só nesta sessão */ }
+              }} />
           </div>
           <Button variant="brand" size="sm" onClick={exportarPdf} loading={baixando}
             disabled={gruposPdf.length === 0}>
