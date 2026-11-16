@@ -412,11 +412,24 @@ def _reage(chat_ctx: ChatContext) -> bool:
 
 
 def criar_voz() -> tts.TTS:
-    if VOZ == "elevenlabs":
-        kw = {"voice_id": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
+    """A voz principal (VOZ, VOZ_ID) e, com VOZ_RESERVA, uma reserva de outro fornecedor: se a principal
+    falhar no meio da ligação a Amanda segue com a reserva. Em 21/10 o crédito da Cartesia acabou e as
+    duas ligações de teste ficaram mudas do começo ao fim (402 na 1ª frase fechava a sessão)."""
+    principal = _uma_voz(VOZ, os.environ.get("VOZ_ID"))
+    reserva = os.environ.get("VOZ_RESERVA")
+    if not reserva or reserva == VOZ:
+        return principal
+    return tts.FallbackAdapter([principal, _uma_voz(reserva, os.environ.get("VOZ_RESERVA_ID"))])
+
+
+def _uma_voz(qual: str, voz_id: str | None) -> tts.TTS:
+    if "/" in qual:  # pelo LiveKit Inference (ex.: cartesia/sonic-3), no crédito da conta LiveKit, como o ouvido
+        return inference.TTS(model=qual, language="pt", **({"voice": voz_id} if voz_id else {}))
+    if qual == "elevenlabs":
+        kw = {"voice_id": voz_id} if voz_id else {}
         return elevenlabs.TTS(model="eleven_flash_v2_5", language="pt", **kw)
-    if VOZ == "cartesia":
-        kw = {"voice": os.environ["VOZ_ID"]} if os.environ.get("VOZ_ID") else {}
+    if qual == "cartesia":
+        kw = {"voice": voz_id} if voz_id else {}
         # VOZ_VELOCIDADE (0,6 a 2,0) e VOZ_EMOCAO (Content, Calm, Affectionate...): amostras em
         # ~/.cache/sombrear-voz/amostras-ana-paula; sem nada, a Ana Paula do jeito que veio
         if os.environ.get("VOZ_VELOCIDADE"):
