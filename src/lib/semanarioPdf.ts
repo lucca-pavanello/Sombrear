@@ -51,7 +51,27 @@ export function partesDoPdf(
   return partes
 }
 
+/**
+ * "Motor motor (110 / 220) (pç) 6n até 16 kg × 2" → Motor / "(110 / 220) 6n até 16 kg × 2".
+ * A categoria é a primeira palavra ("Kit Box" tem duas); o resto é o detalhe,
+ * sem o travessão da frente, sem a categoria repetida e sem o "(pç)" da tabela de preços.
+ */
+export function dividirRotulo(rotulo: string): { categoria: string; detalhe: string } {
+  const r = rotulo.replace(/\s+/g, ' ').trim()
+  const categoria = /^kit box(?=\s|$)/i.exec(r)?.[0] ?? r.split(' ')[0]
+  const tiraTravessao = (t: string) => t.replace(/^[—–-]\s*/, '')
+  let detalhe = tiraTravessao(r.slice(categoria.length).trim())
+  // categoria repetida na frente do detalhe (palavra inteira, sem diferenciar maiúsculas)
+  if (detalhe.toLowerCase().startsWith(categoria.toLowerCase()) && /^(\s|$)/.test(detalhe.slice(categoria.length))) {
+    detalhe = tiraTravessao(detalhe.slice(categoria.length).trim())
+  }
+  detalhe = detalhe.replace(/\(pç\)/gi, '').replace(/\s+/g, ' ').trim()
+  return { categoria, detalhe }
+}
+
 type GrupoPdf = { pedido: Pedido | null; itens: Orcamento[] }
+/** `rotulo` é o texto inteiro (o desenho cai nele quando a categoria não cabe na etiqueta) */
+export type ParteTabela = { rotulo: string; categoria: string; detalhe: string; valor: string }
 type TotaisPdf = { bruto: number; parceira: number; sobra: number }
 
 
@@ -73,7 +93,7 @@ export function montarTabelaSemanario(args: {
   centro: number[]
   alinhamentoFoot: Record<number, 'left' | 'center' | 'right'>
   /** partes[i] = linhas de custo da linha i do corpo (vazio em total e em item sem nada a mostrar) */
-  partes: { rotulo: string; valor: string }[][]
+  partes: ParteTabela[][]
   colProduto: number
   colCusto: number
 } {
@@ -85,7 +105,7 @@ export function montarTabelaSemanario(args: {
   const head = [montar(['Data', 'Pedido', 'Cliente', 'Produto'], 'Custo',
     ['Cliente pagou', 'Parcela', 'Pagamento', 'À parceira', 'Sobra'])]
   const body: string[][] = []
-  const partes: { rotulo: string; valor: string }[][] = []
+  const partes: ParteTabela[][] = []
 
   for (const g of grupos) {
     g.itens.forEach((o, i) => {
@@ -106,7 +126,7 @@ export function montarTabelaSemanario(args: {
         formatCurrency(pagoParceira(o)),
         formatCurrency(sobraItem(o)),
       ]))
-      partes.push(partesDoPdf(o, nivel).map(p => ({ rotulo: p.rotulo, valor: formatCurrency(p.real) })))
+      partes.push(partesDoPdf(o, nivel).map(p => ({ rotulo: p.rotulo, ...dividirRotulo(p.rotulo), valor: formatCurrency(p.real) })))
     })
     if (g.itens.length >= 2) {
       const t = totaisGrupo(g.itens)
