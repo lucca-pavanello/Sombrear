@@ -12,6 +12,8 @@ export type Profile = {
   pode_agente_ia: boolean | null
   pode_precos: boolean | null
   pode_fechamento: boolean | null
+  /** aba Conversas (migration 0039); undefined enquanto o banco não tiver a coluna */
+  pode_conversas?: boolean | null
   created_at: string
 }
 

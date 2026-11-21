@@ -12,6 +12,7 @@ const MODULOS = [
   { field: 'pode_orcamento', label: 'Orçamento' },
   { field: 'pode_estoque',   label: 'Estoque' },
   { field: 'pode_agente_ia', label: 'Agente IA' },
+  { field: 'pode_conversas', label: 'Conversas' },
   { field: 'pode_precos',    label: 'Tabela de Preços' },
   { field: 'pode_fechamento', label: 'Semanário' },
 ] as const
@@ -22,7 +23,7 @@ export default function PermissoesView({ toast }: Props) {
   const queryClient = useQueryClient()
   const [saving, setSaving] = useState<string | null>(null)
 
-  async function togglePermission(id: string, field: CampoPermissao, current: boolean | null) {
+  async function togglePermission(id: string, field: CampoPermissao, current: boolean | null | undefined) {
     setSaving(`${id}-${field}`)
     const { error } = await supabase
       .from('profiles')
@@ -57,7 +58,7 @@ export default function PermissoesView({ toast }: Props) {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-        <table className="w-full min-w-[560px] text-sm">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/40">
               <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Usuário</th>

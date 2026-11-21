@@ -4,8 +4,9 @@
  * Copia toda mensagem do WhatsApp da Sombrear (cliente, Amanda e equipe) do Chatwoot
  * para `mensagens_sombrear`. Duas entradas, o mesmo mapeamento (./mapear.ts):
  *
- * 1. Webhook do Chatwoot (conta 1, eventos message_created e message_updated):
- *    POST ?chave=<CHATWOOT_WEBHOOK_SECRET> com o corpo que o Chatwoot manda.
+ * 1. Webhook do Chatwoot (conta 1, eventos message_created e message_updated; para a aba
+ *    Conversas saber na hora de encerrada e etiqueta, também conversation_status_changed e
+ *    conversation_updated): POST ?chave=<CHATWOOT_WEBHOOK_SECRET> com o corpo que o Chatwoot manda.
  * 2. Sincronização: relê conversas inteiras pela API do Chatwoot. Serve para a carga do
  *    passado e para conferir que nada escapou do webhook.
  *    POST ?chave=<CHATWOOT_WEBHOOK_SECRET> com { "sincronizar": [ids] } ou
@@ -18,7 +19,7 @@
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { preflight, resposta } from '../_shared/resposta.ts'
-import { mapearMensagem, type LinhaMensagem, type MensagemChatwoot } from './mapear.ts'
+import { estadoDaConversa, mapearMensagem, statusDe, statusFinal, type LinhaMensagem, type MensagemChatwoot } from './mapear.ts'
 
 const CONTA = 1
 
@@ -58,11 +59,41 @@ async function gravar(linhas: LinhaMensagem[]): Promise<number> {
   const leads = await leadsDasConversas(linhas.map(l => l.conversa_id))
   const agora = new Date().toISOString()
   const comLead = linhas.map(l => ({ ...l, lead_id: leads.get(l.conversa_id) ?? null, atualizada_em: agora }))
-  for (let i = 0; i < comLead.length; i += 500) {
-    const { error } = await db.from('mensagens_sombrear').upsert(comLead.slice(i, i + 500), { onConflict: 'id' })
-    if (error) throw error
+  // Enviada sem status (o webhook não mandou): grava sem as colunas de entrega, para o upsert
+  // não apagar o "entregue" ou "lida" que já estava na linha. Dois lotes, cada um com as suas colunas.
+  const semStatus = (l: LinhaMensagem) => l.autor !== 'cliente' && l.status_entrega === null
+  const lotes = [
+    comLead.filter(l => !semStatus(l)),
+    comLead.filter(semStatus).map(({ status_entrega: _s, erro_entrega: _e, ...resto }) => resto),
+  ]
+  for (const lote of lotes) {
+    for (let i = 0; i < lote.length; i += 500) {
+      const { error } = await db.from('mensagens_sombrear').upsert(lote.slice(i, i + 500), { onConflict: 'id' })
+      if (error) throw error
+    }
   }
   return comLead.length
+}
+
+/** aberta/encerrada e etiquetas da conversa, para a aba Conversas; falha aqui não derruba a mensagem */
+async function gravarEstado(body: Record<string, unknown>) {
+  const estado = estadoDaConversa(body)
+  if (!estado) return
+  const { error } = await db.from('conversas_estado').upsert({ ...estado, atualizada_em: new Date().toISOString() }, { onConflict: 'conversa_id' })
+  if (error) console.error('[mensagens-chatwoot] estado da conversa:', error.message)
+}
+
+/** o webhook de message_updated vem sem `status`: busca na última página da conversa (20 mensagens) */
+async function statusPelaApi(linha: LinhaMensagem): Promise<LinhaMensagem> {
+  try {
+    const r = await chatwoot(`/conversations/${linha.conversa_id}/messages`)
+    const m = ((r?.payload ?? []) as MensagemChatwoot[]).find(x => Number(x.id) === linha.id)
+    if (!m) return linha
+    return { ...linha, status_entrega: statusFinal(statusDe(m.status), linha.erro_entrega) }
+  } catch (e) {
+    console.error('[mensagens-chatwoot] status pela API:', e instanceof Error ? e.message : e)
+    return linha
+  }
 }
 
 /** todas as mensagens de uma conversa, da mais nova para trás (a API devolve 20 por vez) */
@@ -115,12 +146,18 @@ Deno.serve(async (req) => {
 
     // ── webhook ──
     const evento = String(body.event ?? '')
-    if (evento !== 'message_created' && evento !== 'message_updated') {
+    const daConversa = evento === 'conversation_status_changed' || evento === 'conversation_updated'
+    if (evento !== 'message_created' && evento !== 'message_updated' && !daConversa) {
       return resposta(200, { ok: true, ignorado: evento || 'sem evento' })
     }
     if (Number(body.account?.id) !== CONTA) return resposta(200, { ok: true, ignorado: 'outra conta' })
-    const linha = mapearMensagem(body as MensagemChatwoot)
+    await gravarEstado(body)
+    if (daConversa) return resposta(200, { ok: true, conversa: Number(body.id) || null })
+    let linha = mapearMensagem(body as MensagemChatwoot)
     if (!linha) return resposta(200, { ok: true, ignorado: 'não é mensagem' })
+    if (evento === 'message_updated' && linha.autor !== 'cliente' && linha.status_entrega === null) {
+      linha = await statusPelaApi(linha)
+    }
     await gravar([linha])
     return resposta(200, { ok: true, id: linha.id, autor: linha.autor })
   } catch (e) {
