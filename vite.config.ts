@@ -29,6 +29,8 @@ export default defineConfig({
         importScripts: ['push-sw.js'],
         navigateFallback: '/index.html',
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // o codificador de voz (385 KB) só baixa quando alguém grava áudio na aba Conversas
+        globIgnores: ['**/opus/**'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
           {

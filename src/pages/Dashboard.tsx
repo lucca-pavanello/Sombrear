@@ -2,11 +2,12 @@ import { useEffect, useState, useRef, Suspense, useMemo } from 'react'
 import { flushSync } from 'react-dom'
 import { lazyComRecarga } from '@/lib/lazyComRecarga'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { ClipboardCheck, FileText, Bot, Calculator, Wallet, Sun, Moon, LogOut, ShieldCheck, BarChart2, ClipboardList, Package, Volume2, VolumeX, Sparkles, Tv2, TrendingUp, Users, X, LayoutDashboard, PackagePlus, ShoppingCart, MapPin, Truck, Zap, Settings, AlertTriangle, CircleDollarSign, Scissors, Store } from 'lucide-react'
+import { ClipboardCheck, FileText, Bot, Calculator, Wallet, Sun, Moon, LogOut, ShieldCheck, BarChart2, ClipboardList, Package, Volume2, VolumeX, Sparkles, Tv2, TrendingUp, Users, X, LayoutDashboard, PackagePlus, ShoppingCart, MapPin, Truck, Zap, Settings, AlertTriangle, CircleDollarSign, Scissors, Store, MessagesSquare } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useTheme } from '@/hooks/useTheme'
 import { useOrcamentos } from '@/hooks/useOrcamentos'
 import { useAgenteIARealtime } from '@/hooks/useAgenteIA'
+import { useConversasAoVivo } from '@/hooks/useConversas'
 import { useProfile, usePendingCount } from '@/hooks/useProfile'
 import { useEstoqueProdutosAlerta } from '@/hooks/useEstoqueProdutos'
 import { useToast } from '@/hooks/useToast'
@@ -37,6 +38,8 @@ const TabCalcular     = lazyComRecarga(() => import('@/components/tabs/TabCalcul
 
 const TabAnalises     = lazyComRecarga(() => import('@/components/tabs/TabAnalises'))
 const TabFechamento   = lazyComRecarga(() => import('@/components/tabs/TabFechamento'))
+// o WhatsApp da loja atendido pelo dash (lista, conversa e detalhes do lead)
+const TabConversas    = lazyComRecarga(() => import('@/components/tabs/TabConversas'))
 const TabRelatorios   = lazyComRecarga(() => import('@/components/tabs/TabRelatorios'))
 const TabAcompanhar   = lazyComRecarga(() => import('@/components/tabs/TabAcompanhar'))
 const TabEstoque      = lazyComRecarga(() => import('@/components/tabs/TabEstoque'))
@@ -44,7 +47,7 @@ const PainelAdmin     = lazyComRecarga(() => import('@/components/admin/PainelAd
 const PermissoesView  = lazyComRecarga(() => import('@/components/admin/PermissoesView'))
 const TabPrecos       = lazyComRecarga(() => import('@/components/admin/TabPrecos'))
 
-const VALID_TABS = ['calcular-orcamento', 'planilha', 'agente-ia', 'admin', 'analises', 'estoque', 'relatorios', 'precos', 'fechamento', 'acompanhar']
+const VALID_TABS = ['calcular-orcamento', 'planilha', 'agente-ia', 'admin', 'analises', 'estoque', 'relatorios', 'precos', 'fechamento', 'acompanhar', 'conversas']
 const DEFAULT_TAB = 'calcular-orcamento'
 function AskIATabBtn({ onMouseDown, onClick, active }: {
   onMouseDown: (e: React.MouseEvent<HTMLButtonElement>) => void
@@ -87,6 +90,7 @@ const SECTION_LABELS: Record<string, string> = {
   'admin': 'Admin',
   'precos': 'Tabela de Preços',
   'fechamento': 'Semanário',
+  'conversas': 'Conversas',
 }
 
 export default function Dashboard() {
@@ -149,6 +153,7 @@ export default function Dashboard() {
   const canAgenteIA = isAdmin || profile?.pode_agente_ia === true
   const canPrecos = isAdmin || profile?.pode_precos === true
   const canFechamento = isAdmin || profile?.pode_fechamento === true
+  const canConversas = isAdmin || profile?.pode_conversas === true
   // Badge de alertas só para quem tem acesso ao módulo — evita query desperdiçada
   const { data: estoqueAlertas = [] } = useEstoqueProdutosAlerta({ enabled: canEstoque })
   const { data: orcamentos = [], isLoading, isError, refetch } = useOrcamentos(
@@ -176,6 +181,13 @@ export default function Dashboard() {
     },
   })
 
+  // Mensagem de cliente no WhatsApp: atualiza a aba Conversas, toca o aviso e, com a janela
+  // fora de foco, soma no "(N)" do título. Só para quem tem a área.
+  useConversasAoVivo({
+    enabled: canConversas,
+    aoReceber: () => { if (!document.hasFocus()) setUnreadCount((n) => n + 1) },
+  })
+
   const rawPath = location.pathname.replace(/^\//, '')
   const isEstoquePath = rawPath === 'estoque' || rawPath.startsWith('estoque/')
   const isAdminPath = rawPath === 'admin' || rawPath.startsWith('admin/')
@@ -196,6 +208,7 @@ export default function Dashboard() {
     && (tabFromUrl !== 'estoque' || canEstoque || profileLoading)
     && (tabFromUrl !== 'agente-ia' || canAgenteIA || profileLoading)
     && (tabFromUrl !== 'fechamento' || canFechamento || profileLoading)
+    && (tabFromUrl !== 'conversas' || canConversas || profileLoading)
     && (!RELATORIOS_TABS.includes(tabFromUrl) || canOrcamento || canFechamento || profileLoading)
     && (!ORCAMENTO_TABS.includes(tabFromUrl) || canOrcamento || profileLoading)
     ? tabFromUrl
@@ -255,6 +268,7 @@ export default function Dashboard() {
       : activeTab === 'agente-ia' ? 'agente-ia'
       : activeTab === 'precos' ? 'precos'
       : activeTab === 'fechamento' ? 'fechamento'
+      : activeTab === 'conversas' ? 'conversas'
       : RELATORIOS_TABS.includes(activeTab) ? 'relatorios'
       : isOrcamentoArea ? 'orcamento' : null
     if (area) {
@@ -382,11 +396,12 @@ export default function Dashboard() {
       if (activeTab === 'admin' && (profileLoading || !isAdmin)) return prev
       if (activeTab === 'precos' && (profileLoading || !canPrecos)) return prev
       if (activeTab === 'agente-ia' && (profileLoading || !canAgenteIA)) return prev
+      if (activeTab === 'conversas' && (profileLoading || !canConversas)) return prev
       if (activeTab === 'calcular-orcamento' && (profileLoading || !canOrcamento)) return prev
       if (activeTab === 'estoque' && (profileLoading || !canEstoque)) return prev
       return new Set([...prev, activeTab])
     })
-  }, [activeTab, isAdmin, canEstoque, canPrecos, canAgenteIA, canOrcamento, profileLoading])
+  }, [activeTab, isAdmin, canEstoque, canPrecos, canAgenteIA, canConversas, canOrcamento, profileLoading])
 
   // URLs antigas continuam funcionando: Agente IA e Tabela de Preços viraram áreas próprias,
   // e o custo dos materiais saiu do Estoque para a Tabela de Preços › Custo de materiais.
@@ -416,6 +431,7 @@ export default function Dashboard() {
         import('@/components/tabs/TabAnalises')
       }
       if (canAgenteIA) import('@/components/agente/AbaAgente')
+      if (canConversas) import('@/components/tabs/TabConversas')
       if (isAdmin) import('@/components/admin/PainelAdmin')
       if (canPrecos) import('@/components/admin/TabPrecos')
       if (canEstoque) import('@/components/tabs/TabEstoque')
@@ -428,7 +444,7 @@ export default function Dashboard() {
       const t = setTimeout(preload, 2000)
       return () => clearTimeout(t)
     }
-  }, [profileLoading, canOrcamento, canEstoque, canAgenteIA, canPrecos, isAdmin])
+  }, [profileLoading, canOrcamento, canEstoque, canAgenteIA, canConversas, canPrecos, isAdmin])
 
   // ── Splash screen: some quando dados carregam ──
   useEffect(() => {
@@ -1072,13 +1088,15 @@ export default function Dashboard() {
             </button>
           ))}
           {/* ÁREAS SOLO: dentro delas só existe a própria área — navegação entre áreas é pelo Início */}
-          {(activeTab === 'agente-ia' || activeTab === 'precos' || activeTab === 'fechamento') ? (
+          {(activeTab === 'agente-ia' || activeTab === 'precos' || activeTab === 'fechamento' || activeTab === 'conversas') ? (
             <button
               data-tab={activeTab}
               className="relative flex shrink-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold whitespace-nowrap bg-card text-primary shadow-elevated cursor-default"
             >
               {activeTab === 'fechamento'
                 ? <><Wallet className="h-4 w-4 shrink-0" style={vtStyle(vtIcone === 'fechamento' || (vtVolta && activeTab === 'fechamento'))} />Semanário</>
+                : activeTab === 'conversas'
+                ? <><MessagesSquare className="h-4 w-4 shrink-0" style={vtStyle(vtIcone === 'conversas' || (vtVolta && activeTab === 'conversas'))} />Conversas</>
                 : activeTab === 'agente-ia'
                 ? <><Bot className="h-4 w-4 shrink-0" style={vtStyle(vtIcone === 'agente-ia' || (vtVolta && activeTab === 'agente-ia'))} />Agente IA</>
                 : <><CircleDollarSign className="h-4 w-4 shrink-0" style={vtStyle(vtIcone === 'precos' || (vtVolta && activeTab === 'precos'))} />Tabela de Preços</>}
@@ -1134,6 +1152,14 @@ export default function Dashboard() {
             <Suspense fallback={<SkeletonKPITable />}>
               <div className={activeTab === 'agente-ia' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
                 <TabAgenteIA resetKey={tabVersions['agente-ia']} />
+              </div>
+            </Suspense>
+          )}
+          {/* canConversas de novo aqui: a URL direta já nasce em mountedTabs, antes de o perfil dizer se pode */}
+          {mountedTabs.has('conversas') && canConversas && (
+            <Suspense fallback={<SkeletonKPITable />}>
+              <div className={activeTab === 'conversas' ? (tabDir === 'right' ? 'tab-active-right' : 'tab-active-left') : 'tab-hidden'}>
+                <TabConversas />
               </div>
             </Suspense>
           )}

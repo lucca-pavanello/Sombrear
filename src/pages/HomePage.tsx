@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { ClipboardCheck, ArrowRight, BarChart2, Bot, Calculator, CircleDollarSign, Wallet, Package, ShieldCheck, FileText, CheckCircle2, Clock, TrendingUp, Command } from 'lucide-react'
+import { ClipboardCheck, ArrowRight, BarChart2, Bot, Calculator, CircleDollarSign, Wallet, Package, ShieldCheck, FileText, CheckCircle2, Clock, TrendingUp, Command, MessagesSquare } from 'lucide-react'
 import { useProfile } from '@/hooks/useProfile'
 import { useOrcamentos } from '@/hooks/useOrcamentos'
 import { useCrmLeads } from '@/hooks/useAgenteIA'
@@ -204,8 +204,9 @@ export default function HomePage() {
   const canAgenteIA  = isAdmin || profile?.pode_agente_ia === true
   const canPrecos    = isAdmin || profile?.pode_precos === true
   const canFechamento = isAdmin || profile?.pode_fechamento === true
+  const canConversas = isAdmin || profile?.pode_conversas === true
 
-  const noAccess = !isLoading && profile && !canOrcamento && !canEstoque && !canAgenteIA && !canPrecos && !canFechamento && !isAdmin
+  const noAccess = !isLoading && profile && !canOrcamento && !canEstoque && !canAgenteIA && !canPrecos && !canFechamento && !canConversas && !isAdmin
 
   // ── Pulso do dia ──
   const pulso = useMemo(() => {
@@ -368,6 +369,12 @@ export default function HomePage() {
               badge={pulso.aguardando > 0 ? { label: `${pulso.aguardando} aguardando`, tone: 'amber' } : undefined}
               viajando={viajante === 'agente-ia'}
               onClick={() => irArea('agente-ia', '/agente-ia')} />
+          )}
+          {canConversas && (
+            <AreaCard titulo="Conversas" icon={MessagesSquare} animIcone="icon-peek" delay={435}
+              descricao="Atender o WhatsApp da loja: responder clientes, pausar a IA e encerrar conversas."
+              viajando={viajante === 'conversas'}
+              onClick={() => irArea('conversas', '/conversas')} />
           )}
           {canPrecos && (
             <AreaCard titulo="Tabela de Preços" icon={CircleDollarSign} animIcone="icon-coin" delay={470}
